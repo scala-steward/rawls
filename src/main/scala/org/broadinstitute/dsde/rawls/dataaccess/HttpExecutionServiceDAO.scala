@@ -3,7 +3,7 @@ package org.broadinstitute.dsde.rawls.dataaccess
 import akka.actor.ActorSystem
 import org.broadinstitute.dsde.rawls.model.ExecutionServiceStatus
 import org.broadinstitute.dsde.rawls.model.ExecutionJsonSupport._
-import scala.concurrent.Await
+import scala.concurrent.{Future, Await}
 import scala.concurrent.duration.Duration
 import scala.util.Try
 import spray.client.pipelining._
@@ -24,10 +24,10 @@ class HttpExecutionServiceDAO( executionServiceURL: String )( implicit system: A
     Await.result(pipeline(Post(url,formData)),Duration.Inf)
   }
 
-  override def status(id: String, authCookie: HttpCookie): ExecutionServiceStatus = {
+  override def status(id: String, authCookie: HttpCookie): Future[ExecutionServiceStatus] = {
     val url = executionServiceURL + s"/workflow/${id}/status"
     import system.dispatcher
     val pipeline = addHeader(Cookie(authCookie)) ~> sendReceive ~> unmarshal[ExecutionServiceStatus]
-    Await.result(pipeline(Get(url)),Duration.Inf)
+    pipeline(Get(url))
   }
 }

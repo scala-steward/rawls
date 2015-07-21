@@ -9,7 +9,9 @@ import org.broadinstitute.dsde.rawls.model.{WorkflowStatuses, ExecutionServiceSt
 import org.joda.time.DateTime
 import org.scalatest.{FlatSpecLike, Matchers}
 import spray.http.HttpCookie
+import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.Try
 
 /**
  * Created by dvoet on 6/30/15.
@@ -29,7 +31,7 @@ class WorkflowMonitorSpec(_system: ActorSystem) extends TestKit(_system) with Fl
     val workflow = Workflow("wns", "wn", "id-string", WorkflowStatuses.Running, new DateTime(0), "entityType", "entity")
     val monitorRef = TestActorRef[WorkflowMonitor](WorkflowMonitor.props(1 millisecond, new WorkflowTestExecutionServiceDAO(WorkflowStatuses.Running.toString), workflowDAO, dataSource, HttpCookie("iPlanetDirectoryPro", "test_token"))(testActor, workflow))
     intercept[RawlsException] {
-      monitorRef.underlyingActor.checkWorkflowStatus()
+      monitorRef.underlyingActor.updateStatus(Try(ExecutionServiceStatus("", WorkflowStatuses.Running.toString)))
     }
     monitorRef.stop()
   }
@@ -62,6 +64,7 @@ class WorkflowMonitorSpec(_system: ActorSystem) extends TestKit(_system) with Fl
 }
 
 class WorkflowTestExecutionServiceDAO(workflowStatus: String) extends ExecutionServiceDAO {
+  import scala.concurrent.ExecutionContext.Implicits.global
   override def submitWorkflow(wdl: String, inputs: String, authCookie: HttpCookie): ExecutionServiceStatus = ExecutionServiceStatus("test_id", workflowStatus)
-  override def status(id: String, authCookie: HttpCookie): ExecutionServiceStatus = ExecutionServiceStatus(id, workflowStatus)
+  override def status(id: String, authCookie: HttpCookie) = Future(ExecutionServiceStatus(id, workflowStatus))
 }
