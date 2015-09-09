@@ -25,7 +25,7 @@ object WorkspaceAccessLevel extends Enumeration {
     v match {
       case Owner => "OWNER"
       case Write => "WRITER"
-      case Read => "READER"
+      case Read =>  "READER"
       case NoAccess => "NO ACCESS"
       case UnknownUser => "UNKNOWN USER"
       case _ => throw new RawlsException(s"invalid WorkspaceAccessLevel [${v}]")
