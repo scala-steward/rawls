@@ -118,10 +118,10 @@ class RawlsTransaction(val graph: OrientGraph, dataSource: DataSource) {
   /**
    * We have to use JVM locks because Orient refuses to lock remote databases
    */
-  var elemLocks = TrieMap[Element, ReentrantReadWriteLock]()
+  var elemLocks = TrieMap[AnyRef, ReentrantReadWriteLock]()
 
   private def getElemLock(elem: Element): ReentrantReadWriteLock = {
-    elemLocks.getOrElseUpdate(elem, new ReentrantReadWriteLock())
+    elemLocks.getOrElseUpdate(elem.getId, new ReentrantReadWriteLock())
   }
 
   def withWriteLock[T](elem: Element) (op: => T): T = {
