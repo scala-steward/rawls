@@ -98,15 +98,19 @@ lazy val rawls = project.in(file("."))
 
 parallelExecution in Test := false
 
+/*
 testOptions in Test += Tests.Setup(classLoader =>
   classLoader
     .loadClass("org.slf4j.LoggerFactory")
     .getMethod("getLogger", classLoader.loadClass("java.lang.String"))
     .invoke(null, "ROOT")
 )
+*/
 
 test in assembly := {}
 
 val buildSettings = Defaults.defaultSettings ++ Seq(
   javaOptions += "-Xmx2G"
 )
+
+fork := true
