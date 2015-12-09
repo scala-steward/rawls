@@ -19,7 +19,7 @@ resolvers += "artifactory-snapshots" at artifactory + "libs-snapshot"
 libraryDependencies ++= {
   val akkaV = "2.3.6"
   val sprayV = "1.3.2"
-  val orientV = "2.0.8"
+  val orientV = "2.1.7"
   Seq(
     "com.gettyimages" %% "spray-swagger" % "0.5.0",
     "com.typesafe.akka" %% "akka-actor" % akkaV,
