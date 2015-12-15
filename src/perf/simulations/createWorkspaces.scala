@@ -21,26 +21,9 @@ class createWorkspaces extends Simulation {
 	}
 
 	val r = scala.util.Random
-	val runID = s"gatling_creations_${r.nextInt}"
+	val runID = s"gatling_creations_${r.nextInt % 1000}"
 
-	//generates a tsv with json bodies to create workspaces
-	fileGenerator(new File(s"../user-files/data/createWorkspaces_${runID}.tsv")) { p =>
-		p.println("workspaceJson")
-		val i = 0
-		for(i <- 1 to numUsers){
-			p.println(s""""{""namespace"":""broad-dsde-dev"",""name"":""${runID}_${i}"",""attributes"":{}}"""")
-		}
-	}
-
-	//generates a list of workspaceNames that are to be created. optionally feed this into deleteWorkspaces.scala to cleanup
-	fileGenerator(new File(s"../user-files/data/createWorkspaces_NAMES_${runID}.tsv")) { p =>
-		p.println("workspaceName")
-		val i = 0
-		for(i <- 1 to numUsers){
-			p.println(s"${runID}_${i}")
-		}
-	}
-
+	val runIds = for(i <- 1 to numUsers) yield { Map("workspacename" -> s"${runID}_${i}") }
 
 	//The run itself
 
@@ -52,12 +35,14 @@ class createWorkspaces extends Simulation {
 		"Content-Type" -> "application/json")
 
 	val scn = scenario(s"createWorkspaces_${numUsers}")
-		.feed(tsv(s"../user-files/data/createWorkspaces_${runID}.tsv"))
+    .feed(csv(s"../user-files/access_tokens.csv"))
+		.feed(runIds)
 		.exec(http("create_request")
 		.post("/api/workspaces")
-		.headers(headers)
-		.body(StringBody("${workspaceJson}")))
+		.headers(Map("Authorization" -> "Bearer ${accessToken}",
+    "Content-Type" -> "application/json"))
+		.body(StringBody("""{"namespace": "${project}", "name": "${workspacename}", "attributes": {}}""")))
 
 	//NOTE: be sure to re-configure time if needed
-	setUp(scn.inject(rampUsers(numUsers) over(30 seconds))).protocols(httpProtocol)
+	setUp(scn.inject(rampUsers(numUsers) over(15 seconds))).protocols(httpProtocol)
 }

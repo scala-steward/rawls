@@ -1,0 +1,303 @@
+{
+  "userInfoList": [{
+    "user": {
+      "userSubjectId": "101003016572470361594",
+      "userEmail": "firecloud-workshop41@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop41"]
+  }, {
+    "user": {
+      "userSubjectId": "107264531918890164218",
+      "userEmail": "firecloud-workshop11@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop11"]
+  }, {
+    "user": {
+      "userSubjectId": "116828392799326776060",
+      "userEmail": "firecloud-workshop42@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop42"]
+  }, {
+    "user": {
+      "userSubjectId": "107581940226251553551",
+      "userEmail": "firecloud-workshop31@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop31"]
+  }, {
+    "user": {
+      "userSubjectId": "107702194464453345813",
+      "userEmail": "firecloud-workshop12@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop12"]
+  }, {
+    "user": {
+      "userSubjectId": "100395083369225981496",
+      "userEmail": "firecloud-workshop32@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop32"]
+  }, {
+    "user": {
+      "userSubjectId": "118157073958495508773",
+      "userEmail": "firecloud-workshop13@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop13"]
+  }, {
+    "user": {
+      "userSubjectId": "102608047191895289996",
+      "userEmail": "firecloud-workshop33@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop33"]
+  }, {
+    "user": {
+      "userSubjectId": "106856784632227419965",
+      "userEmail": "firecloud-workshop14@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop14"]
+  }, {
+    "user": {
+      "userSubjectId": "105641999439366958427",
+      "userEmail": "firecloud-workshop34@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop34"]
+  }, {
+    "user": {
+      "userSubjectId": "108337488348165973252",
+      "userEmail": "firecloud-workshop15@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop15"]
+  }, {
+    "user": {
+      "userSubjectId": "102706073583125964500",
+      "userEmail": "firecloud-workshop35@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop35"]
+  }, {
+    "user": {
+      "userSubjectId": "116003888484393050223",
+      "userEmail": "firecloud-workshop16@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop16"]
+  }, {
+    "user": {
+      "userSubjectId": "112879436606843526084",
+      "userEmail": "firecloud-workshop36@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop36"]
+  }, {
+    "user": {
+      "userSubjectId": "114013986610521205819",
+      "userEmail": "firecloud-workshop01@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop01"]
+  }, {
+    "user": {
+      "userSubjectId": "107400565643514866017",
+      "userEmail": "firecloud-workshop17@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop17"]
+  }, {
+    "user": {
+      "userSubjectId": "106444922929061577605",
+      "userEmail": "firecloud-workshop37@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop37"]
+  }, {
+    "user": {
+      "userSubjectId": "105559470680707689945",
+      "userEmail": "firecloud-workshop21@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop21"]
+  }, {
+    "user": {
+      "userSubjectId": "115476624657025915132",
+      "userEmail": "firecloud-workshop02@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop02"]
+  }, {
+    "user": {
+      "userSubjectId": "110049696258854645771",
+      "userEmail": "firecloud-workshop18@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop18"]
+  }, {
+    "user": {
+      "userSubjectId": "108808117718557305030",
+      "userEmail": "firecloud-workshop38@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop38"]
+  }, {
+    "user": {
+      "userSubjectId": "103258289993704149469",
+      "userEmail": "firecloud-workshop03@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop03"]
+  }, {
+    "user": {
+      "userSubjectId": "100041954772739354410",
+      "userEmail": "firecloud-workshop43@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop43"]
+  }, {
+    "user": {
+      "userSubjectId": "108423263562337293300",
+      "userEmail": "firecloud-workshop39@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop39"]
+  }, {
+    "user": {
+      "userSubjectId": "115612666055810599938",
+      "userEmail": "firecloud-workshop19@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop19"]
+  }, {
+    "user": {
+      "userSubjectId": "100990973039179724001",
+      "userEmail": "firecloud-workshop04@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop04"]
+  }, {
+    "user": {
+      "userSubjectId": "118335201734659186543",
+      "userEmail": "firecloud-workshop40@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop40"]
+  }, {
+    "user": {
+      "userSubjectId": "108017723928723184826",
+      "userEmail": "firecloud-workshop05@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop05"]
+  }, {
+    "user": {
+      "userSubjectId": "115518025212902613214",
+      "userEmail": "firecloud-workshop44@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop44"]
+  }, {
+    "user": {
+      "userSubjectId": "111531624426060032620",
+      "userEmail": "firecloud-workshop22@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop22"]
+  }, {
+    "user": {
+      "userSubjectId": "111913404562495918819",
+      "userEmail": "firecloud-workshop06@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop06"]
+  }, {
+    "user": {
+      "userSubjectId": "108826610992898357382",
+      "userEmail": "firecloud-workshop20@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop20"]
+  }, {
+    "user": {
+      "userSubjectId": "106817634567620894561",
+      "userEmail": "firecloud-workshop45@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop45"]
+  }, {
+    "user": {
+      "userSubjectId": "100991351742623929168",
+      "userEmail": "firecloud-workshop07@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop07"]
+  }, {
+    "user": {
+      "userSubjectId": "106074493670775102497",
+      "userEmail": "firecloud-workshop23@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop23"]
+  }, {
+    "user": {
+      "userSubjectId": "101291426649495841464",
+      "userEmail": "firecloud-workshop08@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop08"]
+  }, {
+    "user": {
+      "userSubjectId": "108535693285237487487",
+      "userEmail": "firecloud-workshop46@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop46"]
+  }, {
+    "user": {
+      "userSubjectId": "110738775773417828518",
+      "userEmail": "firecloud-workshop09@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop09"]
+  }, {
+    "user": {
+      "userSubjectId": "114012736439192304805",
+      "userEmail": "firecloud-workshop47@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop47"]
+  }, {
+    "user": {
+      "userSubjectId": "109033120827903999079",
+      "userEmail": "firecloud-workshop24@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop24"]
+  }, {
+    "user": {
+      "userSubjectId": "113604106424576781615",
+      "userEmail": "firecloud-workshop10@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop10"]
+  }, {
+    "user": {
+      "userSubjectId": "115537825650382659581",
+      "userEmail": "firecloud-workshop48@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop48"]
+  }, {
+    "user": {
+      "userSubjectId": "106561806034285019583",
+      "userEmail": "firecloud-workshop25@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop25"]
+  }, {
+    "user": {
+      "userSubjectId": "116665660796180358996",
+      "userEmail": "firecloud-workshop49@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop49"]
+  }, {
+    "user": {
+      "userSubjectId": "111316602870538636519",
+      "userEmail": "firecloud-workshop26@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop26"]
+  }, {
+    "user": {
+      "userSubjectId": "115212203199039855202",
+      "userEmail": "firecloud-workshop50@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop50"]
+  }, {
+    "user": {
+      "userSubjectId": "115176743111382416656",
+      "userEmail": "firecloud-workshop27@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop27"]
+  }, {
+    "user": {
+      "userSubjectId": "100136844457952938288",
+      "userEmail": "firecloud-workshop28@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop28"]
+  }, {
+    "user": {
+      "userSubjectId": "118413449185735084350",
+      "userEmail": "firecloud-workshop29@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop29"]
+  }, {
+    "user": {
+      "userSubjectId": "107468954841489752952",
+      "userEmail": "firecloud-workshop30@firecloud.org"
+    },
+    "billingProjects": ["firecloud-workshop30"]
+  }]
+}

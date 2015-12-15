@@ -8,7 +8,7 @@ import scala.concurrent.{Future, Await}
 import scala.concurrent.duration.Duration
 import scala.util.Try
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
-import org.broadinstitute.dsde.rawls.dataaccess.{Retry, HttpGoogleServicesDAO}
+import org.broadinstitute.dsde.rawls.dataaccess.{DataSource, GraphAuthDAO, Retry, HttpGoogleServicesDAO}
 import org.broadinstitute.dsde.rawls.model._
 import org.scalatest.{BeforeAndAfterAll, Matchers, FlatSpec}
 import spray.http.OAuth2BearerToken
@@ -140,6 +140,75 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
     throwable match {
       case gjre: GoogleJsonResponseException => gjre.getStatusCode/100 == 5
       case _ => false
+    }
+  }
+
+  it should "get test access tokens" in {
+    val testSubjectIds = Seq(
+      "101003016572470361594",
+      "107264531918890164218",
+      "116828392799326776060",
+      "107581940226251553551",
+      "107702194464453345813",
+      "100395083369225981496",
+      "118157073958495508773",
+      "102608047191895289996",
+      "106856784632227419965",
+      "105641999439366958427",
+      "108337488348165973252",
+      "102706073583125964500",
+      "116003888484393050223",
+      "112879436606843526084",
+      "114013986610521205819",
+      "107400565643514866017",
+      "106444922929061577605",
+      "105559470680707689945",
+      "115476624657025915132",
+      "110049696258854645771",
+      "108808117718557305030",
+      "103258289993704149469",
+      "100041954772739354410",
+      "108423263562337293300",
+      "115612666055810599938",
+      "100990973039179724001",
+      "118335201734659186543",
+      "108017723928723184826",
+      "115518025212902613214",
+      "111531624426060032620",
+      "111913404562495918819",
+      "108826610992898357382",
+      "106817634567620894561",
+      "100991351742623929168",
+      "106074493670775102497",
+      "101291426649495841464",
+      "108535693285237487487",
+      "110738775773417828518",
+      "114012736439192304805",
+      "109033120827903999079",
+      "113604106424576781615",
+      "115537825650382659581",
+      "106561806034285019583",
+      "116665660796180358996",
+      "111316602870538636519",
+      "115212203199039855202",
+      "115176743111382416656",
+      "100136844457952938288",
+      "118413449185735084350",
+      "107468954841489752952")
+
+    val accessTokens = testSubjectIds.map { sub =>
+      (sub, gcsDAO.getUserCredentials(RawlsUserRef(RawlsUserSubjectId(sub))) map { credOpt =>
+        credOpt.map { cred => cred.refreshToken(); cred.getAccessToken }
+      })
+    }
+
+    val authDAO = new GraphAuthDAO
+    val dataSource = DataSource("plocal:/Users/dvoet/projects/rawls/rawlsdb", orientRootUser, orientRootPassword, 0, 30)
+    println("subjectId,accessToken,project")
+    accessTokens.foreach { case (subjectId, accessTokenF) =>
+      val email = dataSource.inTransaction()(txn => authDAO.loadUser(RawlsUserRef(RawlsUserSubjectId(subjectId)), txn).get.userEmail.value.stripSuffix("@firecloud.org"))
+      val accessToken = Await.result(accessTokenF, Duration.Inf).getOrElse("")
+      println(s"$subjectId,$accessToken,$email")
     }
   }
 }
