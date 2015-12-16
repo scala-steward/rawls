@@ -38,11 +38,10 @@ class createWorkspaces extends Simulation {
     .feed(csv(s"../user-files/access_tokens.csv"))
 		.feed(runIds)
 		.exec(http("create_request")
-		.post("/api/workspaces")
-		.headers(Map("Authorization" -> "Bearer ${accessToken}",
-    "Content-Type" -> "application/json"))
-		.body(StringBody("""{"namespace": "${project}", "name": "${workspacename}", "attributes": {}}""")))
+      .post("/api/workspaces")
+      .headers(Map("Authorization" -> "Bearer ${accessToken}", "Content-Type" -> "application/json"))
+      .body(StringBody("""{"namespace": "${project}", "name": "${workspacename}", "attributes": {}}""")))
 
 	//NOTE: be sure to re-configure time if needed
-	setUp(scn.inject(rampUsers(numUsers) over(15 seconds))).protocols(httpProtocol)
+	setUp(scn.inject(rampUsers(numUsers) over(60 seconds))).protocols(httpProtocol)
 }

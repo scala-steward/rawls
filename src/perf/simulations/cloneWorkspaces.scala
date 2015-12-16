@@ -23,24 +23,7 @@ class cloneWorkspaces extends Simulation {
 
 	val r = scala.util.Random
 	val runID = s"gatling_clones_${r.nextInt}"
-
-	//generates a tsv with json bodies to create workspaces
-	fileGenerator(new File(s"../user-files/data/cloneWorkspaces_${runID}.tsv")) { p =>
-		p.println("workspaceJson")
-		val i = 0
-		for(i <- 1 to numUsers){
-			p.println(s""""{""namespace"":""broad-dsde-dev"",""name"":""${runID}_${i}""}"""")
-		}
-	}
-
-	//generates a list of workspaceNames that are to be created. optionally feed this into deleteWorkspaces.scala to cleanup
-	fileGenerator(new File(s"../user-files/data/cloneWorkspaces_NAMES_${runID}.tsv")) { p =>
-		p.println("workspaceName")
-		val i = 0
-		for(i <- 1 to numUsers){
-			p.println(s"${runID}_${i}")
-		}
-	}
+	val runIds = for(i <- 1 to numUsers) yield { Map("workspacename" -> s"${runID}_${i}") }
 
 	//The gatling run
 
@@ -48,15 +31,17 @@ class cloneWorkspaces extends Simulation {
 		.baseURL("https://rawls.dsde-dev.broadinstitute.org")
 		.inferHtmlResources()
 
-	val headers = Map("Authorization" -> s"Bearer ${accessToken}",
-		"Content-Type" -> "application/json")
-
 	val scn = scenario(s"cloneWorkspaces_${numUsers}")
-		.feed(tsv(s"../user-files/data/cloneWorkspaces_${runID}.tsv")) //the tsv from generateTSV
+		.feed(csv(s"../user-files/access_tokens.csv"))
+		.feed(runIds)
+//		.exec(http("share_workspace")
+//			.patch("/api/workspaces/broad-dsde-dev/Workshopish/acl") //our workshop model workspace
+//			.headers(Map("Authorization" -> s"Bearer ${accessToken}", "Content-Type" -> "application/json"))
+//			.body(StringBody("""[{"email": "${project}@firecloud.org", "accessLevel": "READER"}]""")))
 		.exec(http("clone_request")
-			.post("/api/workspaces/broad-dsde-dev/Dec8thish/clone") //our workshop model workspace
-			.headers(headers)
-			.body(StringBody("${workspaceJson}"))) //feeds off of the workspaceJson column in the tsv file
+			.post("/api/workspaces/broad-dsde-dev/Workshopish/clone") //our workshop model workspace
+			.headers(Map("Authorization" -> "Bearer ${accessToken}", "Content-Type" -> "application/json"))
+			.body(StringBody("""{"namespace": "${project}", "name": "${workspacename}", "attributes": {}}""")))
 
 	setUp(scn.inject(rampUsers(numUsers) over(60 seconds))).protocols(httpProtocol) //ramp up n users over 60 seconds
 }
