@@ -105,7 +105,7 @@ trait WorkflowSubmission extends FutureSupport with LazyLogging with MethodWiths
     //if we find any, next step is to submit them. otherwise, look again.
     unlaunchedWfOptF.map {
       case workflowRecs if workflowRecs.nonEmpty => SubmitWorkflowBatch(workflowRecs.map(_.id))
-      case _ => LookForWorkflows
+      case _ => ScheduleNextWorkflowQuery
     }
   }
 
@@ -219,7 +219,7 @@ trait WorkflowSubmission extends FutureSupport with LazyLogging with MethodWiths
         }
 
         DBIO.seq((successes ++ failures):_*)
-      } map { _ => ScheduleNextWorkflowQuery }
+      } map { _ => LookForWorkflows }
     } recoverWith {
       //If any of this fails, set all workflows to failed with whatever message we have.
       case t: Throwable =>

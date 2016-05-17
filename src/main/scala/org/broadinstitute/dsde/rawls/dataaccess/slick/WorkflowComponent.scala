@@ -157,20 +157,24 @@ trait WorkflowComponent {
 
     //input: old workflow records, and the status that we want to apply to all of them
     def batchUpdateStatus(workflows: Seq[WorkflowRecord], newStatus: WorkflowStatus): ReadWriteAction[Int] = {
-      val baseUpdate = sql"update WORKFLOW set status = ${newStatus.toString}, status_last_changed = ${new Timestamp(System.currentTimeMillis())}, record_version = record_version + 1 where (id, record_version) in ("
-      val workflowTuples = workflows.map { case wf => sql"(${wf.id}, ${wf.recordVersion})" }.reduce((a, b) => concatSqlActionsWithDelim(a, b, sql","))
-      concatSqlActions(concatSqlActions(baseUpdate, workflowTuples), sql")").as[Int] flatMap { rows =>
-        if(rows.head == workflows.size)
-          DBIO.successful(workflows.size)
-        else
-          throw new RawlsConcurrentModificationException(s"could not update ${workflows.size - rows.head} workflows because their record version(s) have changed")
+      if (workflows.isEmpty) {
+        DBIO.successful(0)
+      } else {
+        val baseUpdate = sql"update WORKFLOW set status = ${newStatus.toString}, status_last_changed = ${new Timestamp(System.currentTimeMillis())}, record_version = record_version + 1 where (id, record_version) in ("
+        val workflowTuples = workflows.map { case wf => sql"(${wf.id}, ${wf.recordVersion})" }.reduce((a, b) => concatSqlActionsWithDelim(a, b, sql","))
+        concatSqlActions(concatSqlActions(baseUpdate, workflowTuples), sql")").as[Int] flatMap { rows =>
+          if (rows.head == workflows.size)
+            DBIO.successful(workflows.size)
+          else
+            throw new RawlsConcurrentModificationException(s"could not update ${workflows.size - rows.head} workflows because their record version(s) have changed")
+        }
       }
     }
 
     def updateWorkflowRecord(workflowRecord: WorkflowRecord): WriteAction[Int] = {
       findWorkflowByIdAndVersion(workflowRecord.id, workflowRecord.recordVersion).update(workflowRecord.copy(statusLastChangedDate = new Timestamp(System.currentTimeMillis()), recordVersion = workflowRecord.recordVersion + 1))
     }
-    
+
     def batchUpdateStatus(currentStatus: WorkflowStatuses.WorkflowStatus, newStatus: WorkflowStatuses.WorkflowStatus): WriteAction[Int] = {
       sqlu"update WORKFLOW set status = ${newStatus.toString}, status_last_changed = ${new Timestamp(System.currentTimeMillis())}, record_version = record_version + 1 where status = ${currentStatus.toString}"
     }
