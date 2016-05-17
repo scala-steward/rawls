@@ -89,23 +89,27 @@ trait WorkflowSubmission extends FutureSupport with LazyLogging with MethodWiths
   def getUnlaunchedWorkflowBatch()(implicit executionContext: ExecutionContext): Future[WorkflowSubmissionMessage] = {
     val unlaunchedWfOptF = dataSource.inTransaction { dataAccess =>
       //grab a bunch of unsubmitted workflows
-      dataAccess.workflowQuery.findUnsubmittedWorkflows().take(batchSize).result map { wfRecs =>
-        if (wfRecs.nonEmpty) wfRecs
-        else {
+      dataAccess.workflowQuery.findUnsubmittedWorkflows().take(batchSize).result flatMap { wfRecs =>
+        if (wfRecs.isEmpty) {
+          DBIO.successful(wfRecs)
+        } else {
           //they should also all have the same submission ID
           val wfsWithASingleSubmission = wfRecs.filter(_.submissionId == wfRecs.head.submissionId)
-          //instead: on update, if we don't get the right number back, roll back the txn
-          //TODO: biden has an incoming change here, with optimistic locking
-          dataAccess.workflowQuery.batchUpdateStatus(wfsWithASingleSubmission, WorkflowStatuses.Launching)
-          wfsWithASingleSubmission
+          dataAccess.workflowQuery.batchUpdateStatus(wfsWithASingleSubmission, WorkflowStatuses.Launching).map(_ => wfsWithASingleSubmission)
         }
       }
     }
 
-    //if we find any, next step is to submit them. otherwise, look again.
     unlaunchedWfOptF.map {
+      // submit the batch we found
       case workflowRecs if workflowRecs.nonEmpty => SubmitWorkflowBatch(workflowRecs.map(_.id))
+
+      // if we didn't find any then look again in a little bit
       case _ => ScheduleNextWorkflowQuery
+
+    } recover {
+      // if we found some but another actor reserved the first look again immediately
+      case t: RawlsConcurrentModificationException => LookForWorkflows
     }
   }
 

@@ -27,11 +27,11 @@ class WorkflowSubmissionSpec(_system: ActorSystem) extends TestKit(_system) with
 
   class TestWorkflowSubmission(
     val dataSource: SlickDataSource,
+    val batchSize: Int = 3, // the mock remote server always returns 3, 2 success and an error
     val pollInterval: FiniteDuration = 1 second) extends WorkflowSubmission {
 
     val mockServer = RemoteServicesMockServer()
 
-    val batchSize: Int = 3 // the mock remote server always returns 3, 2 success and an error
     val credential: Credential = new MockGoogleCredential.Builder().build()
     val googleServicesDAO: MockGoogleServicesDAO = new MockGoogleServicesDAO("test")
     val executionServiceDAO = new HttpExecutionServiceDAO(mockServer.mockServerBaseUrl, mockServer.defaultWorkflowSubmissionTimeout)
@@ -65,7 +65,7 @@ class WorkflowSubmissionSpec(_system: ActorSystem) extends TestKit(_system) with
   }
 
   it should "have only 1 submission in a batch" in withDefaultTestDatabase {
-    val workflowSubmission = new TestWorkflowSubmission(slickDataSource)
+    val workflowSubmission = new TestWorkflowSubmission(slickDataSource, 100)
 
     runAndWait(workflowQuery.batchUpdateStatus(WorkflowStatuses.Submitted, WorkflowStatuses.Queued))
 
