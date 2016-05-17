@@ -169,4 +169,19 @@ class SubmissionComponentSpec extends TestDriverComponentWithFlatSpecAndMatchers
       runAndWait(workflowQuery.listSubmittersWithMoreWorkflowsThan(0, WorkflowStatuses.terminalStatuses))
     }
   }
+
+  it should "batch update statuses" in withDefaultTestDatabase {
+    val submittedWorkflowRecs = runAndWait(workflowQuery.filter(_.status === WorkflowStatuses.Submitted.toString).result)
+
+    assertResult(submittedWorkflowRecs.size) {
+      runAndWait(workflowQuery.batchUpdateStatus(WorkflowStatuses.Submitted, WorkflowStatuses.Failed))
+    }
+
+    val updatedWorkflowRecs = runAndWait(workflowQuery.findWorkflowByIds(submittedWorkflowRecs.map(_.id)).result)
+
+    assert(updatedWorkflowRecs.forall(_.status == WorkflowStatuses.Failed.toString))
+    assertResult(submittedWorkflowRecs.map(r => r.id -> (r.recordVersion+1)).toMap) {
+      updatedWorkflowRecs.map(r => r.id -> r.recordVersion).toMap
+    }
+  }
 }

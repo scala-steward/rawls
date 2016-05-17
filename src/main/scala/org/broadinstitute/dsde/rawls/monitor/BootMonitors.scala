@@ -7,18 +7,21 @@ import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.RawlsException
 import org.broadinstitute.dsde.rawls.dataaccess.GoogleServicesDAO
 import org.broadinstitute.dsde.rawls.jobexec.SubmissionSupervisor.SubmissionStarted
-import org.broadinstitute.dsde.rawls.model.WorkspaceName
+import org.broadinstitute.dsde.rawls.model.{WorkflowStatuses, WorkspaceName}
 import org.broadinstitute.dsde.rawls.monitor.BucketDeletionMonitor.DeleteBucket
+import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 import org.broadinstitute.dsde.rawls.dataaccess.SlickDataSource
+import scala.concurrent.duration._
 
 // handles monitors which need to be started at boot time
 object BootMonitors extends LazyLogging {
 
-  def restartMonitors(dataSource: SlickDataSource, gcsDAO: GoogleServicesDAO, submissionSupervisor: ActorRef, bucketDeletionMonitor: ActorRef) = {
+  def restartMonitors(dataSource: SlickDataSource, gcsDAO: GoogleServicesDAO, submissionSupervisor: ActorRef, bucketDeletionMonitor: ActorRef): Unit = {
     startBucketDeletionMonitor(dataSource, bucketDeletionMonitor)
     startSubmissionMonitor(dataSource, gcsDAO, submissionSupervisor)
+    resetLaunchingWorkflows(dataSource)
   }
 
   private def startBucketDeletionMonitor(dataSource: SlickDataSource, bucketDeletionMonitor: ActorRef) = {
@@ -54,5 +57,9 @@ object BootMonitors extends LazyLogging {
     }
   }
 
-  //FIXME: Handle the power going out!
+  private def resetLaunchingWorkflows(dataSource: SlickDataSource) = {
+    Await.result(dataSource.inTransaction { dataAccess =>
+      dataAccess.workflowQuery.batchUpdateStatus(WorkflowStatuses.Launching, WorkflowStatuses.Queued)
+    }, 10 seconds)
+  }
 }
