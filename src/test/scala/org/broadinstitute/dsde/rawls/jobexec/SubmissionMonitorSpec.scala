@@ -91,7 +91,7 @@ class SubmissionMonitorSpec(_system: ActorSystem) extends TestKit(_system) with 
 
       runAndWait(workflowQuery.findWorkflowsBySubmissionId(UUID.fromString(testData.submission1.submissionId)).map(_.status).update(status.toString))
 
-      Set(SubmissionStatuses.Accepted).foreach { initialStatus =>
+      Set(SubmissionStatuses.Submitted).foreach { initialStatus =>
         runAndWait(submissionQuery.findById(UUID.fromString(testData.submission1.submissionId)).map(_.status).update(initialStatus.toString))
 
         assert(!runAndWait(monitor.checkOverallStatus(this)))
