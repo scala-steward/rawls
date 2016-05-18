@@ -252,14 +252,15 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system) with FlatSpe
     assertResult(StatusCodes.Created) {
       status
     }
-    assertResult(Seq("{\"three_step.cgrep.pattern\":\"sample2\"}")) {
-      mockExecSvc.submitInput
-    }
-
-    import ExecutionJsonSupport.ExecutionServiceWorkflowOptionsFormat // implicit format make convertTo work below
-    assertResult(Some(ExecutionServiceWorkflowOptions(s"gs://${testData.workspace.bucketName}/${newSubmissionReport.submissionId}", testData.wsName.namespace, userInfo.userEmail, subTestData.refreshToken, testData.billingProject.cromwellAuthBucketUrl))) {
-      mockExecSvc.submitOptions.map(_.parseJson.convertTo[ExecutionServiceWorkflowOptions])
-    }
+// TODO - this commented block should move to where we actually call the exec service
+//    assertResult(Seq("{\"three_step.cgrep.pattern\":\"sample2\"}")) {
+//      mockExecSvc.submitInput
+//    }
+//
+//    import ExecutionJsonSupport.ExecutionServiceWorkflowOptionsFormat // implicit format make convertTo work below
+//    assertResult(Some(ExecutionServiceWorkflowOptions(s"gs://${testData.workspace.bucketName}/${newSubmissionReport.submissionId}", testData.wsName.namespace, userInfo.userEmail, subTestData.refreshToken, testData.billingProject.cromwellAuthBucketUrl))) {
+//      mockExecSvc.submitOptions.map(_.parseJson.convertTo[ExecutionServiceWorkflowOptions])
+//    }
 
     val monitorActor = waitForSubmissionActor(newSubmissionReport.submissionId)
     assert(monitorActor != None) //not really necessary, failing to find the actor above will throw an exception and thus fail this test
@@ -290,15 +291,13 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system) with FlatSpe
       status
     }
 
-    // the mock exec service always returns 2 successes and a failure and there should be 2 batches
-    assert( newSubmissionReport.notstarted.size == 0 ) // this not started count includes only those with bad inputs, not errors
-    assert( newSubmissionReport.workflows.size == 4 )
+    assert( newSubmissionReport.notstarted.size == 0 )
+    assert( newSubmissionReport.workflows.size == 6 )
 
     checkSubmissionStatus(workspaceService, newSubmissionReport.submissionId)
 
     val submission = runAndWait(submissionQuery.loadSubmission(UUID.fromString(newSubmissionReport.submissionId))).get
-    assert( submission.workflows.size == 4 )
-    assert( submission.notstarted.size == 2 ) // this not starated count includes errors
+    assert( submission.workflows.forall(_.status == WorkflowStatuses.Queued) )
   }
 
   it should "match workflows to entities they run on in the right order" in withWorkspaceServiceMockExecution { execService => { workspaceService =>

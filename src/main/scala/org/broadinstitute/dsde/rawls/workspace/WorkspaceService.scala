@@ -967,7 +967,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
         val workflows = successes map { entityInputs =>
           Workflow(workflowId = None,
-            status = WorkflowStatuses.Submitted,
+            status = WorkflowStatuses.Queued,
             statusLastChangedDate = DateTime.now,
             workflowEntity = Option(AttributeEntityReference(entityType = header.entityType, entityName = entityInputs.entityName)),
             inputResolutions = entityInputs.inputResolutions)
@@ -997,9 +997,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
     submissionFuture.zip(credFuture) map {
       case (RequestComplete((StatusCodes.Created, submissionReport: SubmissionReport)), Some(credential)) =>
-        if (submissionReport.status == SubmissionStatuses.Submitted) {
-          submissionSupervisor ! SubmissionStarted(workspaceName, UUID.fromString(submissionReport.submissionId), credential)
-        }
+        submissionSupervisor ! SubmissionStarted(workspaceName, UUID.fromString(submissionReport.submissionId), credential)
         RequestComplete(StatusCodes.Created, submissionReport)
 
       case (somethingWrong, Some(_)) => somethingWrong // this is the case where something was not found in withSubmissionParameters

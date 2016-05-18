@@ -299,6 +299,9 @@ trait TestDriverComponent extends DriverComponent with DataAccess {
     val inputResolutions = Seq(SubmissionValidationValue(Option(AttributeString("value")), Option("message"), "test_input_name"))
     val inputResolutions2 = Seq(SubmissionValidationValue(Option(AttributeString("value2")), Option("message2"), "test_input_name2"))
 
+    val submissionNoWorkflows = createTestSubmission(workspace, methodConfig, indiv1, userOwner,
+      Seq.empty, Map.empty,
+      Seq(sample4, sample5, sample6), Map(sample4 -> inputResolutions2, sample5 -> inputResolutions2, sample6 -> inputResolutions2))
     val submission1 = createTestSubmission(workspace, methodConfig, indiv1, userOwner,
       Seq(sample1, sample2, sample3), Map(sample1 -> inputResolutions, sample2 -> inputResolutions, sample3 -> inputResolutions),
       Seq(sample4, sample5, sample6), Map(sample4 -> inputResolutions2, sample5 -> inputResolutions2, sample6 -> inputResolutions2))
@@ -379,6 +382,7 @@ trait TestDriverComponent extends DriverComponent with DataAccess {
                 methodConfigurationQuery.save(context, methodConfigEntityUpdate),
 
                 submissionQuery.create(context, submissionTerminateTest),
+                submissionQuery.create(context, submissionNoWorkflows),
                 submissionQuery.create(context, submission1),
                 submissionQuery.create(context, submission2),
                 submissionQuery.create(context, submissionUpdateEntity),

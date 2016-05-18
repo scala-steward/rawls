@@ -171,7 +171,7 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging {
    * @return true if the submission is done/aborted
    */
   def checkOverallStatus(dataAccess: DataAccess)(implicit executionContext: ExecutionContext): ReadWriteAction[Boolean] = {
-    dataAccess.workflowQuery.listWorkflowRecsForSubmissionAndStatuses(submissionId, WorkflowStatuses.runningStatuses:_*) flatMap { workflowRecs =>
+    dataAccess.workflowQuery.listWorkflowRecsForSubmissionAndStatuses(submissionId, (WorkflowStatuses.queuedStatuses ++ WorkflowStatuses.runningStatuses):_*) flatMap { workflowRecs =>
       if (workflowRecs.isEmpty) {
         dataAccess.submissionQuery.findById(submissionId).map(_.status).result.head.map { status =>
           SubmissionStatuses.withName(status) match {

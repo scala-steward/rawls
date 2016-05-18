@@ -85,6 +85,24 @@ class SubmissionMonitorSpec(_system: ActorSystem) extends TestKit(_system) with 
     }
   }
 
+  WorkflowStatuses.queuedStatuses.foreach { status =>
+    it should s"checkOverallStatus queued status - $status" in withDefaultTestDatabase { dataSource: SlickDataSource =>
+      val monitor = createSubmissionMonitor(dataSource, testData.submission1, new SubmissionTestExecutionServiceDAO(WorkflowStatuses.Succeeded.toString))
+
+      runAndWait(workflowQuery.findWorkflowsBySubmissionId(UUID.fromString(testData.submission1.submissionId)).map(_.status).update(status.toString))
+
+      Set(SubmissionStatuses.Accepted).foreach { initialStatus =>
+        runAndWait(submissionQuery.findById(UUID.fromString(testData.submission1.submissionId)).map(_.status).update(initialStatus.toString))
+
+        assert(!runAndWait(monitor.checkOverallStatus(this)))
+
+        assertResult(initialStatus.toString) {
+          runAndWait(submissionQuery.findById(UUID.fromString(testData.submission1.submissionId)).result.head).status
+        }
+      }
+    }
+  }
+
   WorkflowStatuses.runningStatuses.foreach { status =>
     it should s"checkOverallStatus running status - $status" in withDefaultTestDatabase { dataSource: SlickDataSource =>
       val monitor = createSubmissionMonitor(dataSource, testData.submission1, new SubmissionTestExecutionServiceDAO(WorkflowStatuses.Succeeded.toString))
@@ -209,6 +227,27 @@ class SubmissionMonitorSpec(_system: ActorSystem) extends TestKit(_system) with 
     assertResult(Seq(testData.indiv1.copy(attributes = testData.indiv1.attributes + ("foo" -> AttributeString("result"))))) {
       testData.submissionUpdateEntity.workflows.map { wf =>
         runAndWait(entityQuery.get(SlickWorkspaceContext(testData.workspace), wf.workflowEntity.get.entityType, wf.workflowEntity.get.entityName)).get
+      }
+    }
+  }
+
+  it should "handleStatusResponses with no workflows" in withDefaultTestDatabase { dataSource: SlickDataSource =>
+    val monitor = createSubmissionMonitor(dataSource, testData.submissionNoWorkflows, new SubmissionTestExecutionServiceDAO(WorkflowStatuses.Running.toString))
+
+    assertResult(StatusCheckComplete(true)) {
+      await(monitor.handleStatusResponses(ExecutionServiceStatusResponse(Seq.empty)))
+    }
+  }
+
+  WorkflowStatuses.queuedStatuses.foreach { status =>
+    it should s"handleStatusResponses from exec svc - queued - $status" in withDefaultTestDatabase { dataSource: SlickDataSource =>
+      runAndWait(workflowQuery.listWorkflowRecsForSubmission(UUID.fromString(testData.submissionUpdateEntity.submissionId)) flatMap { workflowRecs =>
+        workflowQuery.batchUpdateStatus(workflowRecs, status)
+      })
+      val monitor = createSubmissionMonitor(dataSource, testData.submissionUpdateEntity, new SubmissionTestExecutionServiceDAO(status.toString))
+
+      assertResult(StatusCheckComplete(false)) {
+        await(monitor.handleStatusResponses(ExecutionServiceStatusResponse(Seq.empty)))
       }
     }
   }
