@@ -186,4 +186,6 @@ class MockGoogleServicesDAO(groupsPrefix: String) extends GoogleServicesDAO(grou
     import spray.json._
     Future.successful(Some("""{"foo":"bar"}""".parseJson.asJsObject))
   }
+
+  override def createProject(projectName: String, billingAccount: String, projectTemplate: ProjectTemplate, userInfo: UserInfo): Future[Unit] = Future.successful(Unit)
 }

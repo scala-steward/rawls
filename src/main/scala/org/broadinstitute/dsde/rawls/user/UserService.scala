@@ -1,9 +1,10 @@
 package org.broadinstitute.dsde.rawls.user
 
+import _root_.slick.dbio.Effect.Write
 import akka.actor.{Actor, Props}
 import akka.pattern._
 import com.google.api.client.http.HttpResponseException
-import org.broadinstitute.dsde.rawls.dataaccess.slick.{ReadAction, ReadWriteAction, DataAccess}
+import org.broadinstitute.dsde.rawls.dataaccess.slick.{WriteAction, ReadAction, ReadWriteAction, DataAccess}
 import org.broadinstitute.dsde.rawls.{RawlsExceptionWithErrorReport, RawlsException}
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.model._
@@ -309,11 +310,15 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
         case Some(_) =>
           DBIO.failed(new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.Conflict, s"Cannot create billing project [${projectName.value}] in database because it already exists")))
         case None =>
-          DBIO.from(gcsDAO.createCromwellAuthBucket(projectName)) flatMap { bucketName =>
-            val bucketUrl = "gs://" + bucketName
-            dataAccess.rawlsBillingProjectQuery.save(RawlsBillingProject(projectName, Set.empty, bucketUrl))
-          } map(_ => RequestComplete(StatusCodes.Created))
+          createBillingProjectInternal(dataAccess, projectName, Set.empty) map(_ => RequestComplete(StatusCodes.Created))
       }
+    }
+  }
+
+  private def createBillingProjectInternal(dataAccess: DataAccess, projectName: RawlsBillingProjectName, users: Set[RawlsUserRef]): WriteAction[RawlsBillingProject] = {
+    DBIO.from(gcsDAO.createCromwellAuthBucket(projectName)) flatMap { bucketName =>
+      val bucketUrl = "gs://" + bucketName
+      dataAccess.rawlsBillingProjectQuery.save(RawlsBillingProject(projectName, users, bucketUrl))
     }
   }
 
@@ -632,6 +637,19 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
       } else {
         RequestComplete(ErrorReport("exceptions revoking/deleting some tokens", errors))
       }
+    }
+  }
+
+  def createBillingProject(projectName: String, billingAccount: String): Future[PerRequestMessage] = {
+    // TODO make sure user has access to requested billing account
+
+    for {
+      _ <- gcsDAO.createProject(projectName, billingAccount, null, userInfo)
+      _ <- dataSource.inTransaction { dataAccess =>
+        createBillingProjectInternal(dataAccess, RawlsBillingProjectName(projectName), Set(RawlsUser(userInfo)))
+      }
+    } yield {
+      RequestComplete(StatusCodes.Created)
     }
   }
 

@@ -1,27 +1,29 @@
 package org.broadinstitute.dsde.rawls.dataaccess
 
-import java.io.{InputStream, ByteArrayOutputStream, ByteArrayInputStream, StringReader}
-import java.net.URL
-import java.nio.charset.StandardCharsets
+import java.io.{ByteArrayOutputStream, ByteArrayInputStream, StringReader}
 import java.util.UUID
 
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import akka.actor.{ActorRef, ActorSystem}
 import com.google.api.client.googleapis.services.AbstractGoogleClientRequest
 import com.google.api.client.http.json.JsonHttpContent
-import com.google.api.client.http.{EmptyContent, HttpResponseException, InputStreamContent}
+import com.google.api.client.http.{ HttpResponseException, InputStreamContent}
+import com.google.api.services.cloudbilling.Cloudbilling
+import com.google.api.services.cloudbilling.model.ProjectBillingInfo
+import com.google.api.services.cloudresourcemanager.CloudResourceManager
+import com.google.api.services.cloudresourcemanager.model._
+import com.google.api.services.compute.model.UsageExportLocation
 import com.google.api.services.genomics.{GenomicsScopes, Genomics}
-import com.google.api.services.oauth2.Oauth2
 import com.google.api.services.oauth2.Oauth2.Builder
 import com.google.api.services.plus.PlusScopes
 import com.typesafe.scalalogging.LazyLogging
-import org.broadinstitute.dsde.rawls.RawlsException
+import org.broadinstitute.dsde.rawls.{RawlsExceptionWithErrorReport, RawlsException}
 import org.broadinstitute.dsde.rawls.crypto.{EncryptedBytes, Aes256Cbc, SecretKey}
 import org.broadinstitute.dsde.rawls.monitor.BucketDeletionMonitor.{BucketDeleted, DeleteBucket}
 import org.broadinstitute.dsde.rawls.util.FutureSupport
 import org.joda.time
-import spray.can.Http
 import spray.client.pipelining._
+import spray.http.HttpHeaders.Authorization
 import spray.json.{JsValue, JsObject}
 
 import scala.collection.JavaConversions._
@@ -37,7 +39,7 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport
 import com.google.api.client.json.jackson2.JacksonFactory
 import com.google.api.services.admin.directory.{Directory, DirectoryScopes}
 import com.google.api.services.admin.directory.model._
-import com.google.api.services.compute.ComputeScopes
+import com.google.api.services.compute.{Compute, ComputeScopes}
 import com.google.api.services.storage.model.Bucket.{Logging, Lifecycle}
 import com.google.api.services.storage.model.Bucket.Lifecycle.Rule.{Action, Condition}
 import com.google.api.services.storage.{StorageScopes, Storage}
@@ -46,7 +48,7 @@ import com.google.api.services.storage.model.{StorageObject, Bucket, BucketAcces
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.model.WorkspaceAccessLevels._
 
-import spray.http.{StatusCode, HttpResponse, OAuth2BearerToken, StatusCodes}
+import spray.http.{HttpResponse, StatusCode, OAuth2BearerToken, StatusCodes}
 
 class HttpGoogleServicesDAO(
   useServiceAccountForBuckets: Boolean,
@@ -58,7 +60,10 @@ class HttpGoogleServicesDAO(
   deletedBucketCheckSeconds: Int,
   serviceProject: String,
   tokenEncryptionKey: String,
-  tokenClientSecretsJson: String)( implicit val system: ActorSystem, implicit val executionContext: ExecutionContext ) extends GoogleServicesDAO(groupsPrefix) with Retry with FutureSupport with LazyLogging {
+  tokenClientSecretsJson: String,
+  billingClientSecrets: GoogleClientSecrets,
+  billingPemFile: String,
+  billingEmail: String)( implicit val system: ActorSystem, implicit val executionContext: ExecutionContext ) extends GoogleServicesDAO(groupsPrefix) with Retry with FutureSupport with LazyLogging {
 
   val groupMemberRole = "MEMBER" // the Google Group role corresponding to a member (note that this is distinct from the GCS roles defined in WorkspaceAccessLevel)
 
@@ -66,6 +71,7 @@ class HttpGoogleServicesDAO(
   val storageScopes = Seq(StorageScopes.DEVSTORAGE_FULL_CONTROL, ComputeScopes.COMPUTE, PlusScopes.USERINFO_EMAIL, PlusScopes.USERINFO_PROFILE)
   val directoryScopes = Seq(DirectoryScopes.ADMIN_DIRECTORY_GROUP)
   val genomicsScopes = Seq(GenomicsScopes.GENOMICS) // google requires GENOMICS, not just GENOMICS_READONLY, even though we're only doing reads
+  val billingScopes = Seq(ComputeScopes.CLOUD_PLATFORM)
 
   val httpTransport = GoogleNetHttpTransport.newTrustedTransport
   val jsonFactory = JacksonFactory.getDefaultInstance
@@ -533,6 +539,85 @@ class HttpGoogleServicesDAO(
     }
   }
 
+  override def createProject(projectName: String, billingAccount: String, projectTemplate: ProjectTemplate, userInfo: UserInfo): Future[Unit] = {
+    val credential = getBillingServiceAccountCredential
+
+    val cloudResManager = new CloudResourceManager.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+    val billingManager = new Cloudbilling.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+    val computeManager = new Compute.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+
+    val projectResourceName = s"projects/$projectName"
+    for {
+      // create the project
+      project <- retryWhen500orGoogleError(() => {
+        executeGoogleRequest(cloudResManager.projects().create(new Project().setName(projectName).setProjectId(projectName)))
+      }).recover {
+        case t: HttpResponseException if StatusCode.int2StatusCode(t.getStatusCode) == StatusCodes.Conflict =>
+          throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.Conflict, s"A project by the name $projectName already exists"))
+      }
+
+      _ <- retryExponentially(when500orGoogleError)(() => {
+        enableServiceApi(projectName, "cloudbilling", credential)
+      })
+
+      // get current permissions
+      bindings <- retryWhen500orGoogleError(() => {
+        executeGoogleRequest(cloudResManager.projects().getIamPolicy(projectName, null)).getBindings
+      })
+
+      // add any missing permissions
+      policy <- retryWhen500orGoogleError(() => {
+        val updatedPolicy = new Policy().setBindings(updateBindings(bindings, projectTemplate))
+        executeGoogleRequest(cloudResManager.projects().setIamPolicy(projectName, new SetIamPolicyRequest().setPolicy(updatedPolicy)))
+      })
+
+      // set the billing account
+      billing <- retryWhen500orGoogleError(() => {
+        executeGoogleRequest(billingManager.projects().updateBillingInfo(projectResourceName, new ProjectBillingInfo().setBillingEnabled(true).setBillingAccountName(billingAccount)))
+      })
+
+      // enable appropriate google apis
+      _ <- Future.sequence(projectTemplate.services.map { service => retryExponentially(when500orGoogleError)(() => {
+        enableServiceApi(projectName, service, credential)
+      })})
+
+      // create project usage export bucket
+      bucket <- retryWhen500orGoogleError(() => {
+        val bucket = new Bucket().setName(s"$projectName-usage-export")
+        executeGoogleRequest(getStorage(credential).buckets.insert(projectName, bucket))
+      })
+
+      // set usage export bucket on project
+      _ <- retryWhen500orGoogleError(() => {
+        executeGoogleRequest(computeManager.projects().setUsageExportBucket(projectName, new UsageExportLocation().setBucketName(bucket.getName).setReportNamePrefix("usage")))
+      })
+
+    } yield {
+      // nothing
+    }
+  }
+
+  private def enableServiceApi(projectName: String, service: String, credential: Credential): Future[HttpResponse] = {
+    // note that I could not find a google client library for this end point but I know how to http
+    val url = s"https://servicemanagement.googleapis.com/v1/services/$service/projectSettings/$projectName?updateMask=usage_settings"
+    val pipeline = addHeader(Authorization(OAuth2BearerToken(credential.getAccessToken))) ~> sendReceive
+    pipeline(Patch(url, """{"usageSettings": {"consumerEnableStatus": "ENABLED"}}""")).map { response =>
+      if (response.status.isFailure) {
+        throw new GoogleServiceException(s"failure enabling service $service for project $projectName: status ${response.status}, response: ${response.entity.asString}")
+      } else {
+        response
+      }
+    }
+  }
+
+  private def updateBindings(bindings: Seq[Binding], template: ProjectTemplate) = {
+    bindings.map { policy =>
+      val newMembers = (template.policies.getOrElse(policy.getRole, Seq.empty) ++ policy.getMembers).distinct
+      new Binding().setRole(policy.getRole).setMembers(newMembers)
+    }
+  }
+
+
   private def when500orGoogleError( throwable: Throwable ): Boolean = {
     throwable match {
       case t: GoogleJsonResponseException => {
@@ -541,6 +626,7 @@ class HttpGoogleServicesDAO(
           (t.getStatusCode == 404)
       }
       case t: HttpResponseException => t.getStatusCode/100 == 5
+      case gse: GoogleServiceException => true
       case _ => false
     }
   }
@@ -598,6 +684,17 @@ class HttpGoogleServicesDAO(
       .setServiceAccountId(serviceAccountClientId)
       .setServiceAccountScopes(genomicsScopes)
       .setServiceAccountPrivateKeyFromPemFile(new java.io.File(pemFile))
+      .build()
+  }
+
+  def getBillingServiceAccountCredential: Credential = {
+    new GoogleCredential.Builder()
+      .setTransport(httpTransport)
+      .setJsonFactory(jsonFactory)
+      .setServiceAccountScopes(billingScopes)
+      .setServiceAccountId(billingClientSecrets.getDetails.get("client_id").toString)
+      .setServiceAccountPrivateKeyFromPemFile(new java.io.File(billingPemFile))
+      .setServiceAccountUser(billingEmail)
       .build()
   }
 
@@ -683,3 +780,4 @@ private object GoogleRequestJsonSupport extends JsonSupport {
   val GoogleRequestFormat = jsonFormat6(GoogleRequest)
 }
 
+private class GoogleServiceException(message: String) extends RawlsException(message)

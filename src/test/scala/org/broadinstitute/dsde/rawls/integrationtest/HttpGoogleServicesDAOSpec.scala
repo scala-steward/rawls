@@ -33,7 +33,12 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
     gcsConfig.getInt("deletedBucketCheckSeconds"),
     gcsConfig.getString("serviceProject"),
     gcsConfig.getString("tokenEncryptionKey"),
-    gcsConfig.getString("tokenSecretsJson")
+    gcsConfig.getString("tokenSecretsJson"),
+    GoogleClientSecrets.load(
+      JacksonFactory.getDefaultInstance, new StringReader(gcsConfig.getString("billingSecrets"))),
+    gcsConfig.getString("pathToBillingPem"),
+    gcsConfig.getString("billingEmail")
+
   )
 
   slickDataSource.initWithSlick()
@@ -256,6 +261,15 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
     assert(! Await.result(gcsDAO.isUserInProxyGroup(user), Duration.Inf))
     Await.result(gcsDAO.deleteProxyGroup(user), Duration.Inf)
     assert(! Await.result(gcsDAO.isUserInProxyGroup(user), Duration.Inf))
+  }
+
+  it should "create a project" in {
+    Await.result(gcsDAO.createProject("dvoet-test-project-29", "billingAccounts/0089F0-98A321-679BA7",
+      ProjectTemplate(
+        Map("roles/editor" -> Seq("user:doug.voet@gmail.com")),
+        Seq("autoscaler", "bigquery", "clouddebugger", "container", "compute_component", "dataflow.googleapis.com", "dataproc", "deploymentmanager", "genomics", "logging.googleapis.com", "manager", "replicapool", "replicapoolupdater", "resourceviews", "sql_component", "storage_api", "storage_component")
+      ), UserInfo("doug.voet@gmail.com", OAuth2BearerToken("ya29.CjUlAzbloTbCApEIzhJQnLNHvnPrC2GLXwFQ5-jSP6d8u-Yf5-DvfsTn47IDFkUnxg5QHO9qMg"), 0, "102768461810553313767")
+    ), Duration.Inf)
   }
 
   private def when500( throwable: Throwable ): Boolean = {
