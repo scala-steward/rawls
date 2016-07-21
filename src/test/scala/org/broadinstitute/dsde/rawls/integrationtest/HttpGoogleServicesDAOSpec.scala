@@ -4,6 +4,7 @@ import java.io.StringReader
 import java.util.UUID
 import akka.actor.{ActorRef, ActorSystem}
 import com.google.api.client.http.HttpResponseException
+import com.google.api.services.cloudresourcemanager.CloudResourceManager
 import org.broadinstitute.dsde.rawls.model.WorkspaceAccessLevels._
 import org.broadinstitute.dsde.rawls.monitor.BucketDeletionMonitor
 import org.broadinstitute.dsde.rawls.monitor.BucketDeletionMonitor.DeleteBucket
@@ -18,6 +19,7 @@ import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
 import spray.http.{StatusCodes, OAuth2BearerToken}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.TestDriverComponent
 import scala.collection.JavaConversions._
+import scala.util.Try
 
 class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationTestConfig with Retry with TestDriverComponent with BeforeAndAfterAll {
 
@@ -264,12 +266,20 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
   }
 
   it should "create a project" in {
-    Await.result(gcsDAO.createProject("dvoet-test-project-29", "billingAccounts/0089F0-98A321-679BA7",
-      ProjectTemplate(
-        Map("roles/editor" -> Seq("user:doug.voet@gmail.com")),
-        Seq("autoscaler", "bigquery", "clouddebugger", "container", "compute_component", "dataflow.googleapis.com", "dataproc", "deploymentmanager", "genomics", "logging.googleapis.com", "manager", "replicapool", "replicapoolupdater", "resourceviews", "sql_component", "storage_api", "storage_component")
-      ), UserInfo("doug.voet@gmail.com", OAuth2BearerToken("ya29.CjUlAzbloTbCApEIzhJQnLNHvnPrC2GLXwFQ5-jSP6d8u-Yf5-DvfsTn47IDFkUnxg5QHO9qMg"), 0, "102768461810553313767")
-    ), Duration.Inf)
+    val projectName = RawlsBillingProjectName("dsde-test-" + UUID.randomUUID().toString.take(8))
+    try {
+//      val billingAccount = RawlsBillingAccount("00473A-04A1D8-155CAB")
+      val billingAccount = RawlsBillingAccount("0089F0-98A321-679BA7")
+      Await.result(gcsDAO.createProject(projectName, billingAccount,
+        ProjectTemplate(
+          Map("roles/editor" -> Seq("user:doug.voet@gmail.com"), "roles/owner" -> Seq("user:dvoet@test.firecloud.org")),
+          Seq("autoscaler", "bigquery", "clouddebugger", "container", "compute_component", "dataflow.googleapis.com", "dataproc", "deploymentmanager", "genomics", "logging.googleapis.com", "manager", "replicapool", "replicapoolupdater", "resourceviews", "sql_component", "storage_api", "storage_component")
+        ), UserInfo("dvoet@broadinstitute.org", OAuth2BearerToken("ya29.CjAnA3ZvFbLez6zZj9oJZs0gq-olQQHCU-uzEP5EMaQ9rVf9j1dCVeP91HeuraS7naQ"), 0, "102768461810553313767")
+      ), Duration.Inf)
+    } finally {
+      val resMgr = new CloudResourceManager.Builder(gcsDAO.httpTransport, gcsDAO.jsonFactory, gcsDAO.getBillingServiceAccountCredential).setApplicationName(gcsConfig.getString("appName")).build()
+      println(s"deleting project $projectName: ${Try(resMgr.projects().delete(projectName.value).execute())}")
+    }
   }
 
   private def when500( throwable: Throwable ): Boolean = {

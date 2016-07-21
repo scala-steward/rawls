@@ -539,57 +539,54 @@ class HttpGoogleServicesDAO(
     }
   }
 
-  override def createProject(projectName: String, billingAccount: String, projectTemplate: ProjectTemplate, userInfo: UserInfo): Future[Unit] = {
+  override def createProject(projectName: RawlsBillingProjectName, billingAccount: RawlsBillingAccount, projectTemplate: ProjectTemplate, userInfo: UserInfo): Future[Unit] = {
     val credential = getBillingServiceAccountCredential
+//    val credential = getUserCredential(userInfo)
 
     val cloudResManager = new CloudResourceManager.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
     val billingManager = new Cloudbilling.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
     val computeManager = new Compute.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
 
-    val projectResourceName = s"projects/$projectName"
+    val projectResourceName = s"projects/${projectName.value}"
     for {
       // create the project
       project <- retryWhen500orGoogleError(() => {
-        executeGoogleRequest(cloudResManager.projects().create(new Project().setName(projectName).setProjectId(projectName)))
+        executeGoogleRequest(cloudResManager.projects().create(new Project().setName(projectName.value).setProjectId(projectName.value)))
       }).recover {
         case t: HttpResponseException if StatusCode.int2StatusCode(t.getStatusCode) == StatusCodes.Conflict =>
           throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.Conflict, s"A project by the name $projectName already exists"))
       }
 
-      _ <- retryExponentially(when500orGoogleError)(() => {
-        enableServiceApi(projectName, "cloudbilling", credential)
+      // set the billing account
+      billing <- retryWhen500orGoogleError(() => {
+        executeGoogleRequest(billingManager.projects().updateBillingInfo(projectResourceName, new ProjectBillingInfo().setBillingEnabled(true).setBillingAccountName(billingAccount.withPrefix)))
       })
 
       // get current permissions
       bindings <- retryWhen500orGoogleError(() => {
-        executeGoogleRequest(cloudResManager.projects().getIamPolicy(projectName, null)).getBindings
+        executeGoogleRequest(cloudResManager.projects().getIamPolicy(projectName.value, null)).getBindings
       })
 
       // add any missing permissions
       policy <- retryWhen500orGoogleError(() => {
         val updatedPolicy = new Policy().setBindings(updateBindings(bindings, projectTemplate))
-        executeGoogleRequest(cloudResManager.projects().setIamPolicy(projectName, new SetIamPolicyRequest().setPolicy(updatedPolicy)))
-      })
-
-      // set the billing account
-      billing <- retryWhen500orGoogleError(() => {
-        executeGoogleRequest(billingManager.projects().updateBillingInfo(projectResourceName, new ProjectBillingInfo().setBillingEnabled(true).setBillingAccountName(billingAccount)))
+        executeGoogleRequest(cloudResManager.projects().setIamPolicy(projectName.value, new SetIamPolicyRequest().setPolicy(updatedPolicy)))
       })
 
       // enable appropriate google apis
       _ <- Future.sequence(projectTemplate.services.map { service => retryExponentially(when500orGoogleError)(() => {
-        enableServiceApi(projectName, service, credential)
+        enableServiceApi(projectName.value, service, credential)
       })})
 
       // create project usage export bucket
       bucket <- retryWhen500orGoogleError(() => {
         val bucket = new Bucket().setName(s"$projectName-usage-export")
-        executeGoogleRequest(getStorage(credential).buckets.insert(projectName, bucket))
+        executeGoogleRequest(getStorage(credential).buckets.insert(projectName.value, bucket))
       })
 
       // set usage export bucket on project
       _ <- retryWhen500orGoogleError(() => {
-        executeGoogleRequest(computeManager.projects().setUsageExportBucket(projectName, new UsageExportLocation().setBucketName(bucket.getName).setReportNamePrefix("usage")))
+        executeGoogleRequest(computeManager.projects().setUsageExportBucket(projectName.value, new UsageExportLocation().setBucketName(bucket.getName).setReportNamePrefix("usage")))
       })
 
     } yield {
@@ -598,10 +595,16 @@ class HttpGoogleServicesDAO(
   }
 
   private def enableServiceApi(projectName: String, service: String, credential: Credential): Future[HttpResponse] = {
+    import spray.json._
+    import GoogleRequestJsonSupport._
+
     // note that I could not find a google client library for this end point but I know how to http
     val url = s"https://servicemanagement.googleapis.com/v1/services/$service/projectSettings/$projectName?updateMask=usage_settings"
     val pipeline = addHeader(Authorization(OAuth2BearerToken(credential.getAccessToken))) ~> sendReceive
-    pipeline(Patch(url, """{"usageSettings": {"consumerEnableStatus": "ENABLED"}}""")).map { response =>
+    val payload = """{"usageSettings": {"consumerEnableStatus": "ENABLED"}}"""
+    val start = System.currentTimeMillis()
+    pipeline(Patch(url, payload)).map { response =>
+      logger.debug(GoogleRequest("POST", url, Option(payload.parseJson), System.currentTimeMillis() - start, Option(response.status.intValue), None).toJson(GoogleRequestFormat).compactPrint)
       if (response.status.isFailure) {
         throw new GoogleServiceException(s"failure enabling service $service for project $projectName: status ${response.status}, response: ${response.entity.asString}")
       } else {

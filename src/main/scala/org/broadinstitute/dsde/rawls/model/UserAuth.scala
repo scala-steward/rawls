@@ -15,6 +15,9 @@ case class RawlsBillingProjectName(value: String) extends UserAuthType
 case class RawlsGroupMemberList(userEmails: Option[Seq[String]] = None, subGroupEmails: Option[Seq[String]] = None, userSubjectIds: Option[Seq[String]] = None, subGroupNames: Option[Seq[String]] = None)
 case class RawlsUserInfo(user: RawlsUser, billingProjects: Seq[RawlsBillingProjectName])
 case class RawlsUserInfoList(userInfoList: Seq[RawlsUserInfo])
+case class RawlsBillingAccount(value: String) extends UserAuthType {
+  val withPrefix = "billingAccounts/" + value
+}
 
 case class RawlsUser(userSubjectId: RawlsUserSubjectId, userEmail: RawlsUserEmail)
 
@@ -36,6 +39,8 @@ object RawlsGroup {
 case class RawlsGroupShort(groupName: RawlsGroupName, groupEmail: RawlsGroupEmail)
 
 case class RawlsBillingProject(projectName: RawlsBillingProjectName, users: Set[RawlsUserRef], cromwellAuthBucketUrl: String)
+
+case class CreateRawlsBillingProjectFullRequest(projectName: RawlsBillingProjectName, billingAccount: RawlsBillingAccount)
 
 case class SyncReportItem(operation: String, user: Option[RawlsUser], subGroup: Option[RawlsGroupShort], errorReport: Option[ErrorReport])
 case class SyncReport(items: Seq[SyncReportItem])
@@ -81,6 +86,13 @@ object UserAuthJsonSupport extends JsonSupport {
     }
   }
 
+  implicit object RawlsBillingAccountFormat extends UserAuthJsonFormatter[RawlsBillingAccount] {
+    override def read(json: JsValue): RawlsBillingAccount = json match {
+      case JsString(value) => RawlsBillingAccount(value)
+      case _ => throw new DeserializationException("could not deserialize user object")
+    }
+  }
+
   // need "apply" here so it doesn't choose the companion class
   implicit val RawlsUserFormat = jsonFormat2(RawlsUser.apply)
 
@@ -104,4 +116,6 @@ object UserAuthJsonSupport extends JsonSupport {
   implicit val SyncReportItemFormat = jsonFormat4(SyncReportItem)
 
   implicit val SyncReportFormat = jsonFormat1(SyncReport)
+
+  implicit val CreateRawlsBillingProjectFullRequestFormat = jsonFormat2(CreateRawlsBillingProjectFullRequest)
 }
