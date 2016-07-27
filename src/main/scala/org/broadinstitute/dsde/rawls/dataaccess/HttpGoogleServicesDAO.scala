@@ -580,13 +580,13 @@ class HttpGoogleServicesDAO(
 
       // create project usage export bucket
       bucket <- retryWhen500orGoogleError(() => {
-        val bucket = new Bucket().setName(s"$projectName-usage-export")
+        val bucket = new Bucket().setName(s"${projectName.value}-usage-export")
         executeGoogleRequest(getStorage(credential).buckets.insert(projectName.value, bucket))
       })
 
-      // set usage export bucket on project
-      _ <- retryWhen500orGoogleError(() => {
-        executeGoogleRequest(computeManager.projects().setUsageExportBucket(projectName.value, new UsageExportLocation().setBucketName(bucket.getName).setReportNamePrefix("usage")))
+      // set usage export bucket on project, it may take up to 5 minutes for the project to be ready for this but google is working to fix that
+      _ <- retryUntilSuccessOrTimeout(always)(5 seconds, 6 minutes)(() => {
+        Future(blocking(executeGoogleRequest(computeManager.projects().setUsageExportBucket(projectName.value, new UsageExportLocation().setBucketName(bucket.getName).setReportNamePrefix("usage")))))
       })
 
     } yield {
@@ -603,7 +603,11 @@ class HttpGoogleServicesDAO(
     val pipeline = addHeader(Authorization(OAuth2BearerToken(credential.getAccessToken))) ~> sendReceive
     val payload = """{"usageSettings": {"consumerEnableStatus": "ENABLED"}}"""
     val start = System.currentTimeMillis()
-    pipeline(Patch(url, payload)).map { response =>
+    pipeline(Patch(url, payload)).recover {
+      case t: Throwable =>
+        logger.debug(GoogleRequest("POST", url, Option(payload.parseJson), System.currentTimeMillis() - start, None, Option(ErrorReport(t))).toJson(GoogleRequestFormat).compactPrint)
+        throw t
+    } map { response =>
       logger.debug(GoogleRequest("POST", url, Option(payload.parseJson), System.currentTimeMillis() - start, Option(response.status.intValue), None).toJson(GoogleRequestFormat).compactPrint)
       if (response.status.isFailure) {
         throw new GoogleServiceException(s"failure enabling service $service for project $projectName: status ${response.status}, response: ${response.entity.asString}")

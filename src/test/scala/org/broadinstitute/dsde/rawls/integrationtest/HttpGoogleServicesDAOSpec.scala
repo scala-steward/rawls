@@ -4,6 +4,8 @@ import java.io.StringReader
 import java.util.UUID
 import akka.actor.{ActorRef, ActorSystem}
 import com.google.api.client.http.HttpResponseException
+import com.google.api.services.cloudbilling.Cloudbilling
+import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import com.google.api.services.cloudresourcemanager.CloudResourceManager
 import org.broadinstitute.dsde.rawls.model.WorkspaceAccessLevels._
 import org.broadinstitute.dsde.rawls.monitor.BucketDeletionMonitor
@@ -272,13 +274,14 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
       val billingAccount = RawlsBillingAccount("0089F0-98A321-679BA7")
       Await.result(gcsDAO.createProject(projectName, billingAccount,
         ProjectTemplate(
-          Map("roles/editor" -> Seq("user:doug.voet@gmail.com"), "roles/owner" -> Seq("user:dvoet@test.firecloud.org")),
+          Map("roles/editor" -> Seq("user:doug.voet@gmail.com")),
           Seq("autoscaler", "bigquery", "clouddebugger", "container", "compute_component", "dataflow.googleapis.com", "dataproc", "deploymentmanager", "genomics", "logging.googleapis.com", "manager", "replicapool", "replicapoolupdater", "resourceviews", "sql_component", "storage_api", "storage_component")
-        ), UserInfo("dvoet@broadinstitute.org", OAuth2BearerToken("ya29.CjAnA3ZvFbLez6zZj9oJZs0gq-olQQHCU-uzEP5EMaQ9rVf9j1dCVeP91HeuraS7naQ"), 0, "102768461810553313767")
+        ), UserInfo("dvoet@broadinstitute.org", OAuth2BearerToken("ya29.CjArAzgWu3XmJ1G6BSirsIfKEhYqQG0bAVakEY3T62XuGpsjb3ys4CrdARWJ0931OZQ"), 0, "102768461810553313767")
       ), Duration.Inf)
     } finally {
       val resMgr = new CloudResourceManager.Builder(gcsDAO.httpTransport, gcsDAO.jsonFactory, gcsDAO.getBillingServiceAccountCredential).setApplicationName(gcsConfig.getString("appName")).build()
-      println(s"deleting project $projectName: ${Try(resMgr.projects().delete(projectName.value).execute())}")
+      val projectNameString = projectName.value
+      println(s"deleting project $projectNameString: ${Try(resMgr.projects().delete(projectNameString).execute())}")
     }
   }
 
