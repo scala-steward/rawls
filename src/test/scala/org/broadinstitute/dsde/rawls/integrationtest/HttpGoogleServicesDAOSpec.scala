@@ -274,15 +274,23 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
       val billingAccount = RawlsBillingAccount("0089F0-98A321-679BA7")
       Await.result(gcsDAO.createProject(projectName, billingAccount,
         ProjectTemplate(
-          Map("roles/editor" -> Seq("user:doug.voet@gmail.com")),
+          Map("roles/editor" -> Seq("user:doug.voet@gmail.com"), "roles/owner" -> Seq("user:dvoet@test.firecloud.org")),
           Seq("autoscaler", "bigquery", "clouddebugger", "container", "compute_component", "dataflow.googleapis.com", "dataproc", "deploymentmanager", "genomics", "logging.googleapis.com", "manager", "replicapool", "replicapoolupdater", "resourceviews", "sql_component", "storage_api", "storage_component")
-        ), UserInfo("dvoet@broadinstitute.org", OAuth2BearerToken("ya29.CjArAzgWu3XmJ1G6BSirsIfKEhYqQG0bAVakEY3T62XuGpsjb3ys4CrdARWJ0931OZQ"), 0, "102768461810553313767")
+        ), UserInfo("dvoet@broadinstitute.org", OAuth2BearerToken("ya29.CjAtA43qjHiILbsYiG1rmtGrZRcH1NruAUewDVYxGjg7mR_3T4woicczNl6qdJCWd-w"), 0, "102768461810553313767")
       ), Duration.Inf)
     } finally {
-      val resMgr = new CloudResourceManager.Builder(gcsDAO.httpTransport, gcsDAO.jsonFactory, gcsDAO.getBillingServiceAccountCredential).setApplicationName(gcsConfig.getString("appName")).build()
-      val projectNameString = projectName.value
-      println(s"deleting project $projectNameString: ${Try(resMgr.projects().delete(projectNameString).execute())}")
+      deleteProject(projectName)
     }
+  }
+
+  def deleteProject(projectName: RawlsBillingProjectName): Unit = {
+    val resMgr = new CloudResourceManager.Builder(gcsDAO.httpTransport, gcsDAO.jsonFactory, gcsDAO.getBillingServiceAccountCredential).setApplicationName(gcsConfig.getString("appName")).build()
+    val projectNameString = projectName.value
+    println(s"deleting project $projectNameString: ${Try(resMgr.projects().delete(projectNameString).execute())}")
+  }
+
+  it should "foo" in {
+    deleteProject(RawlsBillingProjectName("dsde-test-2612d6ae"))
   }
 
   private def when500( throwable: Throwable ): Boolean = {
