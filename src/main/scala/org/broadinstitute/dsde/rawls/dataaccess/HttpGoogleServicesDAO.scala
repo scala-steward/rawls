@@ -31,6 +31,7 @@ import scala.collection.JavaConversions._
 import scala.concurrent.Future
 import scala.concurrent._
 import scala.concurrent.duration._
+import scala.io.Source
 import scala.util.{Failure, Success, Try}
 
 import com.google.api.client.auth.oauth2.{TokenResponse, Credential}
@@ -543,9 +544,9 @@ class HttpGoogleServicesDAO(
     val credential = getBillingServiceAccountCredential
 //    val credential = getUserCredential(userInfo)
 
-    val cloudResManager = new CloudResourceManager.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
-    val billingManager = new Cloudbilling.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
-    val computeManager = new Compute.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+    val cloudResManager = getCloudResourceManager(credential)
+    val billingManager = getCloudBillingManager(credential)
+    val computeManager = getComputeManager(credential)
 
     val projectResourceName = s"projects/${projectName.value}"
     for {
@@ -592,6 +593,18 @@ class HttpGoogleServicesDAO(
     } yield {
       // nothing
     }
+  }
+
+  def getComputeManager(credential: Credential): Compute = {
+    new Compute.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+  }
+
+  def getCloudBillingManager(credential: Credential): Cloudbilling = {
+    new Cloudbilling.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
+  }
+
+  def getCloudResourceManager(credential: Credential): CloudResourceManager = {
+    new CloudResourceManager.Builder(httpTransport, jsonFactory, credential).setApplicationName(appName).build()
   }
 
   private def enableServiceApi(projectName: String, service: String, credential: Credential): Future[HttpResponse] = {
@@ -770,6 +783,7 @@ class HttpGoogleServicesDAO(
           response.parseAs(request.getResponseClass)
         case Failure(httpRegrets: HttpResponseException) =>
           logger.debug(GoogleRequest(request.getRequestMethod, request.buildHttpRequestUrl().toString, payload, System.currentTimeMillis() - start, Option(httpRegrets.getStatusCode), None).toJson(GoogleRequestFormat).compactPrint)
+          println("raw " + httpRegrets.getContent)
           throw httpRegrets
         case Failure(regrets) =>
           logger.debug(GoogleRequest(request.getRequestMethod, request.buildHttpRequestUrl().toString, payload, System.currentTimeMillis() - start, None, Option(ErrorReport(regrets))).toJson(GoogleRequestFormat).compactPrint)

@@ -284,8 +284,10 @@ class HttpGoogleServicesDAOSpec extends FlatSpec with Matchers with IntegrationT
   }
 
   def deleteProject(projectName: RawlsBillingProjectName): Unit = {
-    val resMgr = new CloudResourceManager.Builder(gcsDAO.httpTransport, gcsDAO.jsonFactory, gcsDAO.getBillingServiceAccountCredential).setApplicationName(gcsConfig.getString("appName")).build()
+    val resMgr = gcsDAO.getCloudResourceManager(gcsDAO.getBillingServiceAccountCredential)
+    val billingManager = gcsDAO.getCloudBillingManager(gcsDAO.getBillingServiceAccountCredential)
     val projectNameString = projectName.value
+    println(s"disabling billing for project $projectNameString: ${Try(billingManager.projects().updateBillingInfo(s"projects/${projectName.value}", new ProjectBillingInfo().setBillingEnabled(false)).execute())}")
     println(s"deleting project $projectNameString: ${Try(resMgr.projects().delete(projectNameString).execute())}")
   }
 
