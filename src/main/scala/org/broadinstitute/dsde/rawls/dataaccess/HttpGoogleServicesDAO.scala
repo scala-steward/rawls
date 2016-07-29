@@ -612,11 +612,11 @@ class HttpGoogleServicesDAO(
     import GoogleRequestJsonSupport._
 
     // note that I could not find a google client library for this end point but I know how to http
-    val url = s"https://servicemanagement.googleapis.com/v1/services/$service/projectSettings/$projectName?updateMask=usage_settings"
+    val url = s"https://servicemanagement.googleapis.com/v1/services/$service:enable"
     val pipeline = addHeader(Authorization(OAuth2BearerToken(credential.getAccessToken))) ~> sendReceive
-    val payload = """{"usageSettings": {"consumerEnableStatus": "ENABLED"}}"""
+    val payload = s"""{"consumerId": "project:$projectName"}"""
     val start = System.currentTimeMillis()
-    pipeline(Patch(url, payload)).recover {
+    pipeline(Post(url, payload)).recover {
       case t: Throwable =>
         logger.debug(GoogleRequest("POST", url, Option(payload.parseJson), System.currentTimeMillis() - start, None, Option(ErrorReport(t))).toJson(GoogleRequestFormat).compactPrint)
         throw t
