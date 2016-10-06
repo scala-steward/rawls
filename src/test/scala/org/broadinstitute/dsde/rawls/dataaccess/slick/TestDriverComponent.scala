@@ -59,7 +59,7 @@ trait TestDriverComponent extends DriverComponent with DataAccess {
     Await.result(DbResource.dataSource.inTransaction { _ => action.asInstanceOf[ReadWriteAction[R]] }, duration)
   }
 
-  protected def runMultipleAndWait[R](count: Int, duration: Duration = 1 minutes)(actionGenerator: Int => DBIOAction[R, _ <: NoStream, _ <: Effect]): R = {
+  protected def runMultipleAndWait[R](count: Int, duration: Duration = 2 minutes)(actionGenerator: Int => DBIOAction[R, _ <: NoStream, _ <: Effect]): R = {
     val futures = (1 to count) map { i => retryConcurrentModificationException(actionGenerator(i)) }
     Await.result(Future.sequence(futures), duration).head
   }
