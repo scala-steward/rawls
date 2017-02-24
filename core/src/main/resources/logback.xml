@@ -36,12 +36,12 @@
         <appender-ref ref="SYSLOG"/>
     </logger>
 
-    <logger name="org.broadinstitute.dsde.rawls.dataaccess.HttpGoogleServicesDAO" level="debug" additivity="false">
+    <logger name="org.broadinstitute.dsde.rawls.dataaccess.HttpGoogleServicesDAO" level="info" additivity="false">
         <appender-ref ref="file"/>
         <appender-ref ref="console"/>
         <appender-ref ref="SYSLOG"/>
     </logger>
-    <logger name="org.broadinstitute.dsde.rawls.dataaccess.HttpGooglePubSubDAO" level="debug" additivity="false">
+    <logger name="org.broadinstitute.dsde.rawls.dataaccess.HttpGooglePubSubDAO" level="info" additivity="false">
         <appender-ref ref="file"/>
         <appender-ref ref="console"/>
         <appender-ref ref="SYSLOG"/>
