@@ -1058,7 +1058,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.groupName.value}/members", RawlsGroupMemberList(userEmails = Some(Seq("owner-access")))) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1089,7 +1089,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(ownerAdd)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1128,7 +1128,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(groupAdd)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1148,7 +1148,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Delete(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(groupRemove)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1175,7 +1175,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(ownerAdd)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1219,7 +1219,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${groupA.groupName.value}/members", httpJson(addWriterToA)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1229,7 +1229,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${groupB.groupName.value}/members", httpJson(addAtoB)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1238,7 +1238,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(writerAdd)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1265,7 +1265,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Delete(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(removeWriterFromA)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1292,7 +1292,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(ownerAdd)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1336,7 +1336,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${groupC.groupName.value}/members", httpJson(addWriterToC)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1346,7 +1346,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${groupD.groupName.value}/members", httpJson(addCtoD)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1356,7 +1356,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Post(s"/admin/groups/${realmGroup.usersGroupName.value}/members", httpJson(addDtoRealm)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
@@ -1380,7 +1380,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
     Delete(s"/admin/groups/${groupC.groupName.value}/members", httpJson(removeWriterFromC)) ~>
       sealRoute(services.adminRoutes) ~>
       check {
-        assertResult(StatusCodes.OK) {
+        assertResult(StatusCodes.NoContent) {
           status
         }
       }
