@@ -10,17 +10,25 @@ lazy val rawlsModel = project.in(file("model"))
   .settings(modelSettings:_*)
   .withTestSettings
 
+lazy val workbenchMetrics = project.in(file("metrics"))
+  .settings(metricsSettings:_*)
+  .dependsOn(rawlsModel)
+  .dependsOn(workbenchUtil % "compile->compile;test->test")
+  .withTestSettings
+
 lazy val workbenchGoogle = project.in(file("google"))
   .settings(googleSettings:_*)
   .dependsOn(rawlsModel)
-  .dependsOn(workbenchUtil)
+  .dependsOn(workbenchUtil % "compile->compile;test->test")
+  .dependsOn(workbenchMetrics % "compile->compile;test->test")
   .withTestSettings
 
 lazy val rawlsCore = project.in(file("core"))
   .settings(rawlsCoreSettings:_*)
+  .dependsOn(workbenchUtil % "compile->compile;test->test")
   .dependsOn(rawlsModel)
   .dependsOn(workbenchGoogle)
-  .dependsOn(workbenchUtil)
+  .dependsOn(workbenchMetrics % "compile->compile;test->test")
   .withTestSettings
 
 lazy val rawls = project.in(file("."))
@@ -28,6 +36,7 @@ lazy val rawls = project.in(file("."))
   .aggregate(workbenchUtil)
   .aggregate(workbenchGoogle)
   .aggregate(rawlsModel)
+  .aggregate(workbenchMetrics)
   .aggregate(rawlsCore)
   .dependsOn(rawlsCore)
   .withTestSettings

@@ -2,14 +2,17 @@ package org.broadinstitute.dsde.rawls.dataaccess
 
 import akka.actor.ActorSystem
 import com.typesafe.scalalogging.LazyLogging
+import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.MethodRepoJsonSupport._
 import org.broadinstitute.dsde.rawls.model.WorkspaceJsonSupport._
-import org.broadinstitute.dsde.rawls.model.{AgoraEntity, AgoraEntityType, AgoraStatus, MethodConfiguration, UserInfo}
+import org.broadinstitute.dsde.rawls.model.{AgoraEntity, AgoraEntityType, AgoraStatus, MethodConfiguration, Subsystems, UserInfo}
+import org.broadinstitute.dsde.rawls.util.HttpUtils._
 import org.broadinstitute.dsde.rawls.util.Retry
 import spray.client.pipelining._
-import spray.http.StatusCodes
+import spray.http._
 import spray.httpx.SprayJsonSupport._
 import spray.httpx.UnsuccessfulResponseException
+import spray.httpx.unmarshalling.FromResponseUnmarshaller
 import spray.json._
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -18,22 +21,25 @@ import scala.util.control.NonFatal
 /**
  * @author tsharpe
  */
-class HttpMethodRepoDAO(baseMethodRepoServiceURL: String, apiPath: String = "")(implicit val system: ActorSystem) extends MethodRepoDAO with DsdeHttpDAO with Retry with LazyLogging {
+class HttpMethodRepoDAO(baseMethodRepoServiceURL: String, apiPath: String = "", override val workbenchMetricBaseName: String)(implicit val system: ActorSystem) extends MethodRepoDAO with DsdeHttpDAO with Retry with LazyLogging with RawlsInstrumented {
+  import system.dispatcher
 
   private val methodRepoServiceURL = baseMethodRepoServiceURL + apiPath
 
-  private def getAgoraEntity( url: String, userInfo: UserInfo ): Future[Option[AgoraEntity]] = {
-    import system.dispatcher
-    val pipeline = addAuthHeader(userInfo) ~> sendReceive ~> unmarshal[Option[AgoraEntity]]
-    retry(when500) { () => pipeline(Get(url)) } recover {
+  private lazy implicit val baseMetricBuilder: ExpandedMetricBuilder =
+    ExpandedMetricBuilder.expand(SubsystemMetricKey, Subsystems.Agora)
+
+  private def pipeline[A: FromResponseUnmarshaller](userInfo: UserInfo, retryCount: Int = 0)(request: HttpRequest) =
+    (addAuthHeader(userInfo) ~> instrument(gzSendReceive) ~> unmarshal[A]) apply request
+
+  private def getAgoraEntity( uri: Uri, userInfo: UserInfo ): Future[Option[AgoraEntity]] = {
+    retry(when500) { count => pipeline[Option[AgoraEntity]](userInfo, count)(Get(uri)) } recover {
       case notOK: UnsuccessfulResponseException if StatusCodes.NotFound == notOK.response.status => None
     }
   }
 
-  private def postAgoraEntity( url: String, agoraEntity: AgoraEntity, userInfo: UserInfo): Future[AgoraEntity] = {
-    import system.dispatcher
-    val pipeline = addAuthHeader(userInfo) ~> sendReceive ~> unmarshal[AgoraEntity]
-    retry(when500) { () => pipeline(Post(url, agoraEntity)) }
+  private def postAgoraEntity( uri: Uri, agoraEntity: AgoraEntity, userInfo: UserInfo): Future[AgoraEntity] = {
+    retry(when500) { count => pipeline[AgoraEntity](userInfo, count)(Post(uri, agoraEntity)) }
   }
 
   override def getMethodConfig( namespace: String, name: String, version: Int, userInfo: UserInfo ): Future[Option[AgoraEntity]] = {

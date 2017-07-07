@@ -534,13 +534,21 @@ class MethodConfigApiServiceSpec extends ApiServiceSpec {
   val copyToMethodRepo = "/methodconfigs/copyToMethodRepo"
 
   it should "return 200 on copy method configuration to method repo" in withTestDataApiServices { services =>
-    Post(copyToMethodRepo, httpJson(MethodRepoConfigurationExport("mcns", "mcn", testData.methodConfigName))) ~>
-      sealRoute(services.methodConfigRoutes) ~>
-      check {
-        assertResult(StatusCodes.OK, response.entity.asString) {
-          status
+    withStatsD {
+      Post(copyToMethodRepo, httpJson(MethodRepoConfigurationExport("mcns", "mcn", testData.methodConfigName))) ~>
+        sealRoute(services.methodConfigRoutes) ~>
+        check {
+          assertResult(StatusCodes.OK, response.entity.asString) {
+            status
+          }
         }
+    } { capturedMetrics =>
+      capturedMetrics should contain (expectedSubsystemRequestMetric(Subsystems.Agora, "post", "configurations"))
+      capturedMetrics should contain (expectedSubsystemResponseMetric(Subsystems.Agora, 200))
+      expectedSubsystemTimerMetrics(Subsystems.Agora, "post", "configurations").foreach { m =>
+        capturedMetrics.map(_._1) should contain (m)
       }
+    }
   }
 
   it should "return 404 on copy method configuration to method repo if config dne" in withTestDataApiServices { services =>
@@ -556,16 +564,24 @@ class MethodConfigApiServiceSpec extends ApiServiceSpec {
   val copyFromMethodRepo = "/methodconfigs/copyFromMethodRepo"
 
   it should "return 201 on copy method configuration from method repo" in withTestDataApiServices { services =>
-    Post(copyFromMethodRepo, httpJson(testData.methodRepoGood)) ~>
-      sealRoute(services.methodConfigRoutes) ~>
-      check {
-        assertResult(StatusCodes.Created) {
-          status
+    withStatsD {
+      Post(copyFromMethodRepo, httpJson(testData.methodRepoGood)) ~>
+        sealRoute(services.methodConfigRoutes) ~>
+        check {
+          assertResult(StatusCodes.Created) {
+            status
+          }
+          assertResult("testConfig1") {
+            runAndWait(methodConfigurationQuery.get(SlickWorkspaceContext(testData.workspace), testData.methodConfig.namespace, testData.methodConfig.name)).get.name
+          }
         }
-        assertResult("testConfig1") {
-          runAndWait(methodConfigurationQuery.get(SlickWorkspaceContext(testData.workspace), testData.methodConfig.namespace, testData.methodConfig.name)).get.name
-        }
+    } { capturedMetrics =>
+      capturedMetrics should contain(expectedSubsystemRequestMetric(Subsystems.Agora, "get", s"configurations.${testData.methodRepoGood.methodRepoNamespace}.${testData.methodRepoGood.methodRepoName}.${testData.methodRepoGood.methodRepoSnapshotId}"))
+      capturedMetrics should contain(expectedSubsystemResponseMetric(Subsystems.Agora, 200))
+      expectedSubsystemTimerMetrics(Subsystems.Agora, "get", s"configurations.${testData.methodRepoGood.methodRepoNamespace}.${testData.methodRepoGood.methodRepoName}.${testData.methodRepoGood.methodRepoSnapshotId}").foreach { m =>
+        capturedMetrics.map(_._1) should contain(m)
       }
+    }
   }
 
   it should "return 409 on copy method configuration from method repo to existing name" in withTestDataApiServices { services =>

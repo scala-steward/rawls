@@ -5,21 +5,22 @@ import java.util.concurrent.TimeUnit
 import akka.actor.PoisonPill
 import akka.testkit.TestKitBase
 import com.typesafe.scalalogging.LazyLogging
-import org.broadinstitute.dsde.rawls.{RawlsTestUtils, StatsDTestUtils}
+import org.broadinstitute.dsde.rawls.RawlsTestUtils
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.slick.TestDriverComponentWithFlatSpecAndMatchers
 import org.broadinstitute.dsde.rawls.genomics.GenomicsService
 import org.broadinstitute.dsde.rawls.google.MockGooglePubSubDAO
 import org.broadinstitute.dsde.rawls.jobexec.SubmissionSupervisor
+import org.broadinstitute.dsde.rawls.metrics.RawlsStatsDTestUtils
 import org.broadinstitute.dsde.rawls.mock.RemoteServicesMockServer
 import org.broadinstitute.dsde.rawls.model.RawlsUser
 import org.broadinstitute.dsde.rawls.monitor.{BucketDeletionMonitor, GoogleGroupSyncMonitorSupervisor, HealthMonitor}
 import org.broadinstitute.dsde.rawls.statistics.StatisticsService
 import org.broadinstitute.dsde.rawls.status.StatusService
 import org.broadinstitute.dsde.rawls.user.UserService
+import org.broadinstitute.dsde.rawls.util.MockitoTestUtils
 import org.broadinstitute.dsde.rawls.workspace.WorkspaceService
 import org.scalatest.concurrent.Eventually
-import org.scalatest.mock.MockitoSugar
 import spray.http.{ContentTypes, HttpEntity, StatusCodes}
 import spray.httpx.SprayJsonSupport
 import spray.json._
@@ -29,7 +30,7 @@ import spray.testkit.ScalatestRouteTest
 import scala.concurrent.duration._
 
 // common trait to be inherited by API service tests
-trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with HttpService with ScalatestRouteTest with TestKitBase with SprayJsonSupport with RawlsTestUtils with Eventually with LazyLogging with MockitoSugar with StatsDTestUtils {
+trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with HttpService with ScalatestRouteTest with TestKitBase with SprayJsonSupport with RawlsTestUtils with Eventually with LazyLogging with MockitoTestUtils with RawlsStatsDTestUtils {
   // increate the timeout for ScalatestRouteTest from the default of 1 second, otherwise
   // intermittent failures occur on requests not completing in time
   implicit val routeTestTimeout = RouteTestTimeout(5.seconds)
@@ -87,13 +88,13 @@ trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with Htt
 
     val submissionTimeout = FiniteDuration(1, TimeUnit.MINUTES)
 
-    val executionServiceCluster = MockShardedExecutionServiceCluster.fromDAO(new HttpExecutionServiceDAO(mockServer.mockServerBaseUrl, mockServer.defaultWorkflowSubmissionTimeout), slickDataSource)
+    val executionServiceCluster = MockShardedExecutionServiceCluster.fromDAO(new HttpExecutionServiceDAO(mockServer.mockServerBaseUrl, mockServer.defaultWorkflowSubmissionTimeout, workbenchMetricBaseName), slickDataSource)
 
     val submissionSupervisor = system.actorOf(SubmissionSupervisor.props(
       executionServiceCluster,
       slickDataSource,
       5 seconds,
-      rawlsMetricBaseName = "test"
+      workbenchMetricBaseName
     ).withDispatcher("submission-monitor-dispatcher"))
 
     val bucketDeletionMonitor = system.actorOf(BucketDeletionMonitor.props(
@@ -131,7 +132,7 @@ trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with Htt
       directoryDAO
     )_
 
-    val methodRepoDAO = new HttpMethodRepoDAO(mockServer.mockServerBaseUrl)
+    val methodRepoDAO = new HttpMethodRepoDAO(mockServer.mockServerBaseUrl, "", workbenchMetricBaseName)
 
     val healthMonitor = system.actorOf(HealthMonitor.props(
       dataSource, gcsDAO, gpsDAO, directoryDAO, methodRepoDAO,
@@ -154,7 +155,7 @@ trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with Htt
       genomicsServiceConstructor,
       maxActiveWorkflowsTotal,
       maxActiveWorkflowsPerUser,
-      "test"
+      workbenchMetricBaseName
     )_
 
     def cleanupSupervisor = {
