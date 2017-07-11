@@ -1,20 +1,21 @@
 package org.broadinstitute.dsde.rawls.webservice
 
 import akka.actor.Status.Failure
-import akka.actor._
 import akka.actor.SupervisorStrategy.Stop
+import akka.actor.{OneForOneStrategy, _}
 import akka.event.Logging
 import akka.event.Logging.LogLevel
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
-import org.broadinstitute.dsde.rawls.model._
+import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.WorkspaceJsonSupport._
+import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.webservice.PerRequest._
 import spray.http.StatusCodes._
+import spray.http._
 import spray.httpx.marshalling.{BasicToResponseMarshallers, ToResponseMarshaller}
 import spray.routing.RequestContext
-import akka.actor.OneForOneStrategy
+
 import scala.concurrent.duration._
-import spray.http._
 import scala.language.postfixOps
 
 
@@ -38,10 +39,9 @@ object RawlsMessageJsonSupport extends BasicToResponseMarshallers {
  * 2) with a RequestComplete message which can specify http status code as well as the response
  */
 trait PerRequest extends Actor {
-  import context._
-  import spray.json.DefaultJsonProtocol._
-  import spray.httpx.SprayJsonSupport._
   import RawlsMessageJsonSupport._
+  import context._
+  import spray.httpx.SprayJsonSupport._
 
   def r: RequestContext
   def target: ActorRef
@@ -167,10 +167,13 @@ object PerRequest {
 /**
  * Provides factory methods for creating per request actors
  */
-trait PerRequestCreator {
+trait PerRequestCreator extends RawlsInstrumented  {
   implicit def actorRefFactory: ActorRefFactory
 
-  def perRequest(r: RequestContext, props: Props, message: AnyRef, timeout: Duration = 3 minutes): ActorRef =
-    actorRefFactory.actorOf(Props(new WithProps(r, props, message, timeout)))
+  def perRequest(r: RequestContext, props: Props, message: AnyRef, timeout: Duration = 3 minutes): ActorRef = {
+    val apiTimer = metrics.timer(r.request.toString())
+    apiTimer.time {
+    actorRefFactory.actorOf(Props(new WithProps(r, props, message, timeout)))}
+  }
 }
 

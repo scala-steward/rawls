@@ -1,5 +1,6 @@
 package org.broadinstitute.dsde.rawls.webservice
 
+import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.model.ExecutionJsonSupport._
 import org.broadinstitute.dsde.rawls.openam.UserInfoDirectives
@@ -13,17 +14,20 @@ import scala.concurrent.duration.FiniteDuration
 /**
  * Created by dvoet on 6/4/15.
  */
-trait SubmissionApiService extends HttpService with PerRequestCreator with UserInfoDirectives {
+trait SubmissionApiService extends HttpService with PerRequestCreator with UserInfoDirectives with RawlsInstrumented {
   implicit val executionContext: ExecutionContext
 
   val workspaceServiceConstructor: UserInfo => WorkspaceService
   val submissionTimeout: FiniteDuration
+  private val apiTimer = metrics.timer("apiTimer")
 
   val submissionRoutes = requireUserInfo() { userInfo =>
     path("workspaces" / Segment / Segment / "submissions" ) { (workspaceNamespace, workspaceName) =>
-      get {
-        requestContext => perRequest(requestContext, WorkspaceService.props(workspaceServiceConstructor, userInfo),
-          WorkspaceService.ListSubmissions(WorkspaceName(workspaceNamespace, workspaceName)))
+      apiTimer.time {
+        get {
+          requestContext => perRequest(requestContext, WorkspaceService.props(workspaceServiceConstructor, userInfo),
+            WorkspaceService.ListSubmissions(WorkspaceName(workspaceNamespace, workspaceName)))
+        }
       }
     } ~
     path("workspaces" / Segment / Segment / "submissionsCount" ) { (workspaceNamespace, workspaceName) =>
