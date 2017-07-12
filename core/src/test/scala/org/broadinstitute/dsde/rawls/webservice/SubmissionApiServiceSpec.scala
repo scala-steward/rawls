@@ -314,7 +314,7 @@ class SubmissionApiServiceSpec extends ApiServiceSpec {
   // mysql> show engine innodb status;
   //
   // and look for a section called "LAST DETECTED DEADLOCK".
-  it should "not deadlock when aborting a large submission" in withLargeSubmissionApiServices { services =>
+  it should "not deadlock when aborting a large submission" ignore withLargeSubmissionApiServices { services =>
     withWorkflowSubmissionActor(services) { _ =>
       val wsName = testData.wsLargeSubmission
       val mcName = MethodConfigurationName("no_input", "dsde", wsName)
