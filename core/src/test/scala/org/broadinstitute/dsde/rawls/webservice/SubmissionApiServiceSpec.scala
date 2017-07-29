@@ -178,7 +178,7 @@ class SubmissionApiServiceSpec extends ApiServiceSpec {
     } { capturedMetrics =>
       capturedMetrics should contain (expectedSubmissionStatusMetric(wsName, SubmissionStatuses.Aborting, 1))
 
-      val wsPathForRequestMetrics = s"workspaces.${wsName.namespace}.${wsName.name}"
+      val wsPathForRequestMetrics = s"workspaces-${wsName.namespace}-${wsName.name}"
       val expected = expectedHttpRequestMetrics("delete", s"$wsPathForRequestMetrics-submissions-$submissionId", StatusCodes.NoContent.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
@@ -430,7 +430,7 @@ class SubmissionApiServiceSpec extends ApiServiceSpec {
           }
         }
     } { capturedMetrics =>
-      val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}"
+      val wsPathForRequestMetrics = s"workspaces-${testData.wsName.namespace}-${testData.wsName.name}"
       val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics-submissionsCount", StatusCodes.OK.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }

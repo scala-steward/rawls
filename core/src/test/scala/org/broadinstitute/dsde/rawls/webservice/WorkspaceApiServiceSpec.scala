@@ -1518,7 +1518,7 @@ class WorkspaceApiServiceSpec extends ApiServiceSpec {
           }
         }
     } { capturedMetrics =>
-      val wsPathForRequestMetrics = s"workspaces.${testData.workspace.namespace}.${testData.workspace.name}.clone"
+      val wsPathForRequestMetrics = s"workspaces-${testData.workspace.namespace}-${testData.workspace.name}.clone"
       val expected = expectedHttpRequestMetrics("post", wsPathForRequestMetrics, StatusCodes.Created.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }

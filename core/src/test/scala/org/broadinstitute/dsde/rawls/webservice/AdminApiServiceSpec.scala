@@ -103,7 +103,7 @@ class AdminApiServiceSpec extends ApiServiceSpec {
           assertSameElements(expected, responseAs[Seq[ActiveSubmission]])
         }
     } { capturedMetrics =>
-      val expected = expectedHttpRequestMetrics("get", "admin.submissions", StatusCodes.OK.intValue, 1)
+      val expected = expectedHttpRequestMetrics("get", "admin-submissions", StatusCodes.OK.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
   }

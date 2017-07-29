@@ -110,7 +110,7 @@ class BillingApiServiceSpec extends ApiServiceSpec {
         }
     } { capturedMetrics =>
       val expected = expectedHttpRequestMetrics("put", s"billing-${project.projectName.value}-user-${testData.userReader.userEmail.value}", StatusCodes.Forbidden.intValue, 1) ++
-        expectedHttpRequestMetrics("put", s"billing-${project.projectName.value}-owner.${testData.userReader.userEmail.value}", StatusCodes.Forbidden.intValue, 1)
+        expectedHttpRequestMetrics("put", s"billing-${project.projectName.value}-owner-${testData.userReader.userEmail.value}", StatusCodes.Forbidden.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
   }
