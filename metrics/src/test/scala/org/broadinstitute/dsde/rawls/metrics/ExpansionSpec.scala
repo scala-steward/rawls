@@ -34,7 +34,7 @@ class ExpansionSpec extends FlatSpec with Matchers {
 
   it should "expand Uris" in {
     val test = Uri("/workspace/broad-dsde-dev/myspace")
-    assertResult("workspace.broad-dsde-dev.myspace") {
+    assertResult("workspace-broad-dsde-dev-myspace") {
       implicitly[Expansion[Uri]].makeName(test)
     }
   }
