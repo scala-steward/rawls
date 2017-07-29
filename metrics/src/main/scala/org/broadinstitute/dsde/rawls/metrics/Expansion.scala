@@ -41,7 +41,7 @@ object Expansion {
   implicit object UriExpansion extends Expansion[Uri] {
     override def makeName(uri: Uri): String = {
       val path = if (uri.path.startsWithSlash) uri.path.tail.toString else uri.path
-      path.toString.replace('/', '.')
+      path.toString.replace('/', '-')
     }
   }
 
