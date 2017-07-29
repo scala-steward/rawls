@@ -604,7 +604,7 @@ class UserApiServiceSpec extends ApiServiceSpec {
           }
         }
     } { capturedMetrics =>
-      val expected = Set(group1, group2, group3) flatMap { g => expectedHttpRequestMetrics("get", s"user.group.${g.groupName.value}", StatusCodes.OK.intValue, 1) }
+      val expected = Set(group1, group2, group3) flatMap { g => expectedHttpRequestMetrics("get", s"user-group-${g.groupName.value}", StatusCodes.OK.intValue, 1) }
       assertSubsetOf(expected, capturedMetrics)
     }
   }
@@ -879,7 +879,7 @@ class UserApiServiceSpec extends ApiServiceSpec {
               }
             }
         } { capturedMetrics =>
-          val expected = expectedHttpRequestMetrics("get", s"groups.$testGroupName", expectedStatus.intValue, 1)
+          val expected = expectedHttpRequestMetrics("get", s"groups-$testGroupName", expectedStatus.intValue, 1)
           assertSubsetOf(expected, capturedMetrics)
         }
       }

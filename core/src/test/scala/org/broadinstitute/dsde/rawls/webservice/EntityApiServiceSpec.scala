@@ -971,7 +971,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
           }
         }
     } {capturedMetrics =>
-      val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}.entities.${testData.sample2.entityType}.${testData.sample2.name}"
+      val wsPathForRequestMetrics = s"workspaces-${testData.wsName.namespace}-${testData.wsName.name}-entities-${testData.sample2.entityType}-${testData.sample2.name}"
       val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics", StatusCodes.OK.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
@@ -1211,7 +1211,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
           }
         }
     } {capturedMetrics =>
-      val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}.entities.${testData.sample2.entityType}.${testData.sample2.name}"
+      val wsPathForRequestMetrics = s"workspaces-${testData.wsName.namespace}-${testData.wsName.name}-entities-${testData.sample2.entityType}-${testData.sample2.name}"
       val expected = expectedHttpRequestMetrics("patch", s"$wsPathForRequestMetrics", StatusCodes.OK.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
@@ -1351,8 +1351,8 @@ class EntityApiServiceSpec extends ApiServiceSpec {
           }
         }
     } {capturedMetrics =>
-      val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}.entities.${testData.sample2.entityType}.${testData.sample2.name}"
-      val expected = expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics.rename", StatusCodes.NoContent.intValue, 1)
+      val wsPathForRequestMetrics = s"workspaces-${testData.wsName.namespace}-${testData.wsName.name}-entities-${testData.sample2.entityType}-${testData.sample2.name}"
+      val expected = expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics-rename", StatusCodes.NoContent.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
   }
@@ -1562,7 +1562,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
         assertSameElements(Seq.empty, copyResponse.softConflicts)
       }
     } {capturedMetrics =>
-      val expected = expectedHttpRequestMetrics("post", "workspaces.entities.copy", StatusCodes.Created.intValue, 1)
+      val expected = expectedHttpRequestMetrics("post", "workspaces-entities-copy", StatusCodes.Created.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
 
@@ -1585,7 +1585,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
         }
       }
     } {capturedMetrics =>
-      val expected = expectedHttpRequestMetrics("post", "workspaces.entities.copy", StatusCodes.Conflict.intValue, 1)
+      val expected = expectedHttpRequestMetrics("post", "workspaces-entities-copy", StatusCodes.Conflict.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
 
@@ -1601,7 +1601,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
           }
         }
     } {capturedMetrics =>
-      val expected = expectedHttpRequestMetrics("post", "workspaces.entities.copy", StatusCodes.Conflict.intValue, 1)
+      val expected = expectedHttpRequestMetrics("post", "workspaces-entities-copy", StatusCodes.Conflict.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
 
@@ -1989,9 +1989,9 @@ class EntityApiServiceSpec extends ApiServiceSpec {
         }
     } {capturedMetrics =>
       val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}"
-      val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics.entityQuery.bar", StatusCodes.OK.intValue, 1) ++
-                     expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics.entities.delete", StatusCodes.NoContent.intValue, 1) ++
-                     expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics.entities", StatusCodes.Created.intValue, 1)
+      val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics-entityQuery-bar", StatusCodes.OK.intValue, 1) ++
+                     expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics-entities-delete", StatusCodes.NoContent.intValue, 1) ++
+                     expectedHttpRequestMetrics("post", s"$wsPathForRequestMetrics-entities", StatusCodes.Created.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
   }
@@ -2069,7 +2069,7 @@ class EntityApiServiceSpec extends ApiServiceSpec {
       }
     } {capturedMetrics =>
       val wsPathForRequestMetrics = s"workspaces.${testData.wsName.namespace}.${testData.wsName.name}"
-      val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics.entityQuery.${paginationTestData.entityType}", StatusCodes.OK.intValue, 1)
+      val expected = expectedHttpRequestMetrics("get", s"$wsPathForRequestMetrics-entityQuery-${paginationTestData.entityType}", StatusCodes.OK.intValue, 1)
       assertSubsetOf(expected, capturedMetrics)
     }
   }
