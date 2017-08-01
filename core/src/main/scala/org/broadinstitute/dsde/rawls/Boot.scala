@@ -79,7 +79,8 @@ object Boot extends App with LazyLogging {
             startStatsDReporter(
               statsDConf.getString("host"),
               statsDConf.getInt("port"),
-              statsDConf.getDuration("period"))
+              statsDConf.getDuration("period"),
+              apiKey = statsDConf.getStringOption("apiKey"))
           case (other, _) =>
             logger.warn(s"Unknown metrics backend: $other")
         }
@@ -277,9 +278,10 @@ object Boot extends App with LazyLogging {
     }
   }
 
-  def startStatsDReporter(host: String, port: Int, period: java.time.Duration): Unit = {
+  def startStatsDReporter(host: String, port: Int, period: java.time.Duration, registryName: String = "default", apiKey: Option[String] = None): Unit = {
     logger.info(s"Starting statsd reporter writing to [$host:$port] with period [${period.toMillis} ms]")
-    val reporter = StatsDReporter.forRegistry(SharedMetricRegistries.getOrCreate("default"))
+    val reporter = StatsDReporter.forRegistry(SharedMetricRegistries.getOrCreate(registryName))
+      .prefixedWith(apiKey.orNull)
       .convertRatesTo(TimeUnit.SECONDS)
       .convertDurationsTo(TimeUnit.MILLISECONDS)
       .build(host, port)
