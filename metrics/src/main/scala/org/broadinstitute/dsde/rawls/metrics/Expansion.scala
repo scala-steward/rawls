@@ -1,7 +1,10 @@
 package org.broadinstitute.dsde.rawls.metrics
 
 import java.util.UUID
+
+import org.broadinstitute.dsde.rawls.metrics.WorkbenchInstrumented.{FullUri, TaggedUri, TimedUri}
 import spray.http.{HttpMethod, StatusCode, Uri}
+
 import scala.annotation.implicitNotFound
 
 /**
@@ -42,6 +45,13 @@ object Expansion {
     override def makeName(uri: Uri): String = {
       val path = if (uri.path.startsWithSlash) uri.path.tail.toString else uri.path
       path.toString.replace('/', '.')
+    }
+  }
+
+  implicit object TaggedUri extends Expansion[TaggedUri] {
+    override def makeName(uri: TaggedUri): String = uri match {
+      case FullUri(uri) => UriExpansion.makeName(uri)
+      case TimedUri(uri) => UriExpansion.makeName(uri).split('.').take(2).mkString(".")
     }
   }
 

@@ -14,10 +14,10 @@ trait RawlsStatsDTestUtils extends StatsDTestUtils { this: Eventually with Mocki
 
   protected def expectedHttpRequestMetrics(method: String, path: String, statusCode: Int, expectedTimes: Int, subsystem: Option[Subsystem] = None): Set[(String, String)] = {
     val prefix = s"test.${subsystem.map(s => s"subsystem.${s.toString}.").getOrElse("")}httpRequestMethod.$method.httpRequestUri.$path.httpResponseStatusCode.$statusCode"
-    val expectedTimesStr = expectedTimes.toString
+    val timerPrefix = s"test.${subsystem.map(s => s"subsystem.${s.toString}.").getOrElse("")}httpRequestMethod.$method.httpRequestUri.${path.split('.').take(2).mkString(".")}.httpResponseStatusCode.$statusCode"
     Set(
-      (s"$prefix.request", expectedTimesStr),
-      (s"$prefix.latency.samples", expectedTimesStr)
+      (s"$prefix.request", ""),
+      (s"$timerPrefix.latency.samples", "")
     )
   }
 

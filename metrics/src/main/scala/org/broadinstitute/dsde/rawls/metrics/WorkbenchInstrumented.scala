@@ -2,7 +2,8 @@ package org.broadinstitute.dsde.rawls.metrics
 
 import nl.grons.metrics.scala._
 import org.broadinstitute.dsde.rawls.metrics.Expansion._
-import spray.http.{HttpRequest, HttpResponse}
+import org.broadinstitute.dsde.rawls.metrics.WorkbenchInstrumented.{FullUri, TimedUri}
+import spray.http.{HttpRequest, HttpResponse, Uri}
 
 /**
   * Mixin trait for instrumentation.
@@ -70,16 +71,25 @@ trait WorkbenchInstrumented extends DefaultInstrumented {
 
   // Handy definitions which can be used by implementing classes:
 
-  protected def httpRequestMetricBuilder(builder: ExpandedMetricBuilder): (HttpRequest, HttpResponse) => ExpandedMetricBuilder = {
+  protected def httpRequestMetricBuilder(builder: ExpandedMetricBuilder, isTimer: Boolean = false): (HttpRequest, HttpResponse) => ExpandedMetricBuilder = {
     (httpRequest, httpResponse) => builder
       .expand(HttpRequestMethodMetricKey, httpRequest.method)
-      .expand(HttpRequestUriMetricKey, httpRequest.uri)
+      .expand(HttpRequestUriMetricKey, if (isTimer) TimedUri(httpRequest.uri) else FullUri(httpRequest.uri))
       .expand(HttpResponseStatusCodeMetricKey, httpResponse.status)
   }
 
   protected implicit def httpRequestCounter(implicit builder: ExpandedMetricBuilder): (HttpRequest, HttpResponse) => Counter =
-    httpRequestMetricBuilder(builder)(_, _).asCounter("request")
+    httpRequestMetricBuilder(builder, false)(_, _).asCounter("request")
 
   protected implicit def httpRequestTimer(implicit builder: ExpandedMetricBuilder): (HttpRequest, HttpResponse) => Timer =
-    httpRequestMetricBuilder(builder)(_, _).asTimer("latency")
+    httpRequestMetricBuilder(builder, true)(_, _).asTimer("latency")
+}
+
+object WorkbenchInstrumented {
+  // TODO is there a way this could extend AnyVal?
+  sealed trait TaggedUri extends Product with Serializable {
+    def uri: Uri
+  }
+  case class FullUri(uri: Uri) extends TaggedUri
+  case class TimedUri(uri: Uri) extends TaggedUri
 }

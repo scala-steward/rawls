@@ -64,9 +64,9 @@ trait RawlsTestUtils extends Suite with TestDriverComponent with Matchers {
     expected.toTraversable should contain theSameElementsAs actual.toTraversable
   }
 
-  def assertSubsetOf[T](expected: TraversableOnce[T], actual: TraversableOnce[T]): Unit = {
-    val as = actual.toSet
-    expected foreach { as should contain(_) }
+  def assertSubsetOf(expected: TraversableOnce[(String, String)], actual: TraversableOnce[(String, String)]): Unit = {
+    val as: Set[String] = actual.map(_._1).toSet
+    expected foreach { e => as should contain(e._1) }
   }
 
   // MockServer's .withBody doesn't have a built-in string contains feature.  This serves that purpose.
