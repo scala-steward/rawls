@@ -63,6 +63,7 @@ object Dependencies {
   val scalatest: ModuleID =       "org.scalatest"                 %% "scalatest"            % "3.0.1" % "test"
   val mockito: ModuleID =         "org.mockito"                   % "mockito-core"          % "2.7.22" % "test"
   val mockserverNetty: ModuleID = "org.mock-server"               % "mockserver-netty"      % "3.9.2" % "test"
+  val scalacheck: ModuleID =      "org.scalacheck"                %% "scalacheck"           % "1.13.5" % "test"
 
   val wdl4s: ModuleID = ("org.broadinstitute" %% "wdl4s" % wdl4sV
     exclude("org.typelevel", "cats_2.11")
@@ -116,7 +117,8 @@ object Dependencies {
     scalaLogging,
     httpClient,
     googleApiClient,
-    scalatest
+    scalatest,
+    scalacheck
   )
 
   val rawlsCoreDependencies: Seq[ModuleID] = modelDependencies ++ googleDependencies ++ metricsDependencies ++ Seq(
