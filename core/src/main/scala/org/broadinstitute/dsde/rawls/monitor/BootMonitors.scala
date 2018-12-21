@@ -9,6 +9,7 @@ import org.broadinstitute.dsde.rawls.jobexec.{SubmissionSupervisor, WorkflowSubm
 import org.broadinstitute.dsde.rawls.model.{UserInfo, WorkflowStatuses}
 import org.broadinstitute.dsde.rawls.user.UserService
 import org.broadinstitute.dsde.rawls.util
+import org.broadinstitute.dsde.workbench.sam.google.BillingProjectMonitorSupervisor
 import spray.json._
 
 import scala.concurrent.Await
@@ -28,7 +29,7 @@ object BootMonitors extends LazyLogging {
     resetLaunchingWorkflows(slickDataSource)
 
     //Boot billing project creation monitor
-    startCreatingBillingProjectMonitor(system, slickDataSource, gcsDAO, samDAO, projectTemplate, requesterPaysRole)
+    startCreatingBillingProjectMonitor(system, slickDataSource, pubSubDAO)
 
     //Boot submission monitor supervisor
     val submissionMonitorConfig = conf.getConfig("submissionmonitor")
@@ -41,8 +42,8 @@ object BootMonitors extends LazyLogging {
     startBucketDeletionMonitor(system, slickDataSource, gcsDAO)
   }
 
-  private def startCreatingBillingProjectMonitor(system: ActorSystem, slickDataSource: SlickDataSource, gcsDAO: GoogleServicesDAO, samDAO: SamDAO, projectTemplate: ProjectTemplate, requesterPaysRole: String): Unit = {
-    system.actorOf(CreatingBillingProjectMonitor.props(slickDataSource, gcsDAO, samDAO, projectTemplate, requesterPaysRole))
+  private def startCreatingBillingProjectMonitor(system: ActorSystem, slickDataSource: SlickDataSource, pubSubDAO: GooglePubSubDAO): Unit = {
+    system.actorOf(BillingProjectMonitorSupervisor.props(30 seconds, 10 seconds, pubSubDAO, "create_project_events", "create_project_sub", 1, slickDataSource))
   }
 
   private def startSubmissionMonitorSupervisor(system: ActorSystem, submissionMonitorConfig: Config, slickDataSource: SlickDataSource, samDAO: SamDAO, gcsDAO: GoogleServicesDAO, shardedExecutionServiceCluster: ExecutionServiceCluster, metricsPrefix: String) = {

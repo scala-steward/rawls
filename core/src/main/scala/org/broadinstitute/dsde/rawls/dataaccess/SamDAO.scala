@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.rawls.dataaccess
 
-import org.broadinstitute.dsde.rawls.model.{RawlsUser, RawlsUserEmail, SamPolicy, SamPolicySyncStatus, SamPolicyWithNameAndEmail, SamResourceAction, SamResourceIdWithPolicyName, SamResourcePolicyName, SamResourceRole, SamResourceTypeName, SubsystemStatus, SyncReportItem, UserIdInfo, UserInfo}
+import akka.http.scaladsl.model.HttpResponse
+import org.broadinstitute.dsde.rawls.model.{RawlsBillingProjectName, RawlsUser, RawlsUserEmail, SamPolicy, SamPolicySyncStatus, SamPolicyWithNameAndEmail, SamResourceAction, SamResourceIdWithPolicyName, SamResourcePolicyName, SamResourceRole, SamResourceTypeName, SubsystemStatus, SyncReportItem, UserIdInfo, UserInfo}
 import org.broadinstitute.dsde.workbench.model._
 
 import scala.concurrent.Future
@@ -44,6 +45,8 @@ trait SamDAO {
   def getDefaultPetServiceAccountKeyForUser(userInfo: UserInfo): Future[String]
 
   def getStatus(): Future[SubsystemStatus]
+
+  def createProject(projectName: RawlsBillingProjectName, ownersGroup: WorkbenchEmail, canComputeGroup: WorkbenchEmail): Future[HttpResponse] = ???
 }
 
 object SamDAO {

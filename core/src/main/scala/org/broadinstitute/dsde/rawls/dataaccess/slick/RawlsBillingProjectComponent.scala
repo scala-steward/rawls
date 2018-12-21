@@ -53,6 +53,10 @@ trait RawlsBillingProjectComponent {
       DBIO.sequence(projects.map(project => rawlsBillingProjectQuery.filter(_.projectName === project.projectName.value).update(marshalBillingProject(project))).toSeq)
     }
 
+    def updateBillingProjectStatus(projectName: RawlsBillingProjectName, status: CreationStatuses.CreationStatus): WriteAction[Int] = {
+      rawlsBillingProjectQuery.filter(_.projectName === projectName.value).map(_.creationStatus).update(status.toString)
+    }
+
     def listAll(): ReadWriteAction[Seq[RawlsBillingProject]] = {
       for {
         projectRecords <- this.result

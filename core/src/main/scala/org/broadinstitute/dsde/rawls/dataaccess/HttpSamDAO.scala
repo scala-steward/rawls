@@ -263,4 +263,10 @@ class HttpSamDAO(baseSamServiceURL: String, serviceAccountCreds: Credential)(imp
     val httpRequest = RequestBuilding.Get(url).addHeader(authHeader(userInfo))
     retry(when401or500) { () => httpClientUtils.executeRequestUnmarshalResponseAcceptNoContent[String](http, httpRequest) }
   }
+
+  override def createProject(projectName: RawlsBillingProjectName, ownersGroup: WorkbenchEmail, canComputeGroup: WorkbenchEmail): Future[HttpResponse] = {
+    val url = s"http://dvoet-dm-caller.appspot.com/project/${projectName.value}"
+    val httpRequest = RequestBuilding.Post(url, s"""{"owners_group":"${ownersGroup.value}","compute_user_group":"${canComputeGroup.value}"}""")
+    Http().singleRequest(httpRequest)
+  }
 }

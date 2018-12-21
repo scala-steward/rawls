@@ -1,5 +1,7 @@
 package org.broadinstitute.dsde.rawls.user
 
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.client.RequestBuilding
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
@@ -315,7 +317,7 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
       billingAccountNames.find(_.accountName == billingAccountName) match {
         case Some(billingAccount) if billingAccount.firecloudHasAccess =>
           for {
-            _ <- dataSource.inTransaction { dataAccess =>
+            project <- dataSource.inTransaction { dataAccess =>
               dataAccess.rawlsBillingProjectQuery.load(projectName) flatMap {
                 case None =>
                   for {
@@ -329,15 +331,10 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
               }
             }
 
-            createProjectOperation <- gcsDAO.createProject(projectName, billingAccount).recoverWith {
-              case t: Throwable =>
-                // failed to create project in google land, rollback inserts above
-                dataSource.inTransaction { dataAccess => dataAccess.rawlsBillingProjectQuery.delete(projectName) } map(_ => throw t)
-            }
+            ownersEmail <- UserService.getGoogleProjectOwnerGroupEmail(samDAO, project)
+            computeUsersEmail <- UserService.getComputeUserGroupEmail(samDAO, project)
 
-            _ <- dataSource.inTransaction { dataAccess =>
-              dataAccess.rawlsBillingProjectQuery.insertOperations(Seq(createProjectOperation))
-            }
+            _ <- samDAO.createProject(projectName, ownersEmail, computeUsersEmail)
           } yield {
             RequestComplete(StatusCodes.Created)
           }
