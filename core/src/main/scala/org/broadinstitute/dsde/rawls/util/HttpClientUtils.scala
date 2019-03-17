@@ -35,7 +35,13 @@ trait HttpClientUtils extends LazyLogging {
       throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.InternalServerError, s"http call failed: ${httpRequest.uri}: ${t.getMessage}", t))
     } flatMap { response =>
       if (response.status.isSuccess) {
-        Unmarshal(response.entity).to[T]
+        Unmarshal(response.entity).to[T].recoverWith {
+          case t: Throwable =>
+            Unmarshal(response.entity).to[String].map { entityAsString =>
+              logger.error(s"failed to parse response from ${httpRequest.uri}: response: ${entityAsString}", t)
+              throw t
+            }
+        }
       } else {
         Unmarshal(response.entity).to[String] map { entityAsString =>
           logger.debug(s"http error status ${response.status} calling uri ${httpRequest.uri}, response: ${entityAsString}")
