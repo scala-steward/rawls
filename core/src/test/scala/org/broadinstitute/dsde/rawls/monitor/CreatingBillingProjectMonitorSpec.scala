@@ -59,6 +59,37 @@ class CreatingBillingProjectMonitorSpec extends MockitoSugar with FlatSpecLike w
     }
   }
 
+  it should "include projects that are already in the perimeter" in {
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      val newBillingProjectNumber = GoogleProjectNumber("1")
+      val newBillingProject = RawlsBillingProject(defaultBillingProjectName, defaultCromwellBucketUrl, CreationStatuses.AddingToPerimeter, None, None, servicePerimeter = Option(defaultServicePerimeterName), googleProjectNumber = Option(newBillingProjectNumber))
+      val existingBillingProjectNumber = GoogleProjectNumber("2")
+      val existingBillingProject = RawlsBillingProject(RawlsBillingProjectName("existing-project"), defaultCromwellBucketUrl, CreationStatuses.Ready, None, None, servicePerimeter = Option(defaultServicePerimeterName), googleProjectNumber = Option(existingBillingProjectNumber))
+
+      runAndWait(rawlsBillingProjectQuery.create(newBillingProject))
+      runAndWait(rawlsBillingProjectQuery.create(existingBillingProject))
+
+      val mockAcmDAO = mock[AccessContextManagerDAO]
+      when(mockAcmDAO.overwriteProjectsInServicePerimeter(ArgumentMatchers.any[ServicePerimeterName], ArgumentMatchers.any[Seq[String]])).thenReturn(Future.successful(new Operation().setDone(false).setName("test-op-id")))
+
+      val mockGcsDAO = new MockGoogleServicesDAO("test", accessContextManagerDAO = mockAcmDAO)
+      val creatingBillingProjectMonitor = getCreatingBillingProjectMonitor(dataSource, mockGcsDAO)
+
+      assertResult(CheckDone(1)) {
+        Await.result(creatingBillingProjectMonitor.checkCreatingProjects(), Duration.Inf)
+      }
+
+      // seqs are ordered, but we don't care about that so this will match regardless of order
+      val seqMatcher = new ArgumentMatcher[Seq[String]] {
+        override def matches(argument: Seq[String]): Boolean = {
+          val expected = Seq(newBillingProjectNumber.value, existingBillingProjectNumber.value)
+          expected.sorted == argument.sorted
+        }
+      }
+      verify(mockAcmDAO, times(1)).overwriteProjectsInServicePerimeter(ArgumentMatchers.eq(defaultServicePerimeterName), ArgumentMatchers.argThat(seqMatcher))
+    }
+  }
+
   it should "update the operations table and call google when projects are being added to the perimeter" in {
     // 3 billing projects in adding to perimeter, no operations, two in same perimeter, one in another -- should call google dao x2 and add operation x3
 
