@@ -1,5 +1,7 @@
 package org.broadinstitute.dsde.rawls.webservice
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets.UTF_8
 import java.util.UUID
 
 import org.broadinstitute.dsde.rawls.dataaccess._
@@ -283,4 +285,21 @@ class BillingApiServiceSpec extends ApiServiceSpec with MockitoSugar {
         }
       }
   }
+
+  it should "return 202 when adding a billing project to a service perimeter with all the right permissions" in withTestDataApiServices { services =>
+    val projectName = testData.billingProject.projectName
+    val servicePerimeterName = ServicePerimeterName("accessPolicies/123/servicePerimeters/service_perimeter")
+    val encodedServicePerimeterName = URLEncoder.encode(servicePerimeterName.value, UTF_8.name)
+
+    when(services.samDAO.userHasAction(SamResourceTypeNames.servicePerimeter, encodedServicePerimeterName, SamServicePerimeterActions.addProject, userInfo)).thenReturn(Future.successful(true))
+
+    Put(s"/servicePerimeters/${encodedServicePerimeterName}/projects/${projectName.value}") ~>
+      sealRoute(services.servicePerimeterRoutes) ~>
+      check {
+        assertResult(StatusCodes.Accepted) {
+          status
+        }
+      }
+  }
+
 }

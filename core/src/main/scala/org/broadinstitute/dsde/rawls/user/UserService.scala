@@ -421,6 +421,7 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
         case None => Future.successful(())
       }
 
+      // Even if the project's status is 'Creating' and could possibly still have a perimeter added to it, we throw an exception to avoid a race condition
       _ <- billingProject.status match {
         case CreationStatuses.Ready => Future.successful(())
         case status => Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, s"project ${billingProject.projectName.value} should be Ready but is $status")))
