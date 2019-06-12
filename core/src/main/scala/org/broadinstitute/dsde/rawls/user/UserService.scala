@@ -86,6 +86,8 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
   def AdminAddLibraryCurator(userEmail: RawlsUserEmail) = asFCAdmin { addLibraryCurator(userEmail) }
   def AdminRemoveLibraryCurator(userEmail: RawlsUserEmail) = asFCAdmin { removeLibraryCurator(userEmail) }
 
+  def AddProjectToServicePerimeter(servicePerimeterName: ServicePerimeterName, projectName: RawlsBillingProjectName) = requirePermissionsToAddToServicePerimeter(servicePerimeterName, projectName) { addProjectToServicePerimeter(servicePerimeterName, projectName) }
+
   val dmTemplatePath = dmConfig.getString("templatePath")
   val dmProject = dmConfig.getString("projectID")
 
@@ -93,6 +95,13 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
     samDAO.userHasAction(SamResourceTypeNames.billingProject, projectName.value, action, userInfo).flatMap {
       case true => op
       case false => Future.failed(new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.Forbidden, "You must be a project owner.")))
+    }
+  }
+
+  def requireServicePerimeterAction(servicePerimeterName: ServicePerimeterName, action: SamResourceAction)(op: => Future[PerRequestMessage]): Future[PerRequestMessage] = {
+    samDAO.userHasAction(SamResourceTypeNames.servicePerimeter, URLEncoder.encode(servicePerimeterName.value, UTF_8.name), action, userInfo).flatMap {
+      case true => op
+      case false => Future.failed(new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.NotFound, "Service Perimeter does not exist or you do not have access")))
     }
   }
 
@@ -387,6 +396,45 @@ class UserService(protected val userInfo: UserInfo, val dataSource: SlickDataSou
       _ <- gcsDAO.revokeToken(rawlsUserRef)
       _ <- gcsDAO.deleteToken(rawlsUserRef).recover { case e: HttpResponseException if e.getStatusCode == 404 => Unit }
     } yield { Unit }
+  }
+
+
+  // User needs to be an owner of the billing project and have the AddProject action on the service perimeter
+  private def requirePermissionsToAddToServicePerimeter(servicePerimeterName: ServicePerimeterName, projectName: RawlsBillingProjectName)(op: => Future[PerRequestMessage]): Future[PerRequestMessage] = {
+    requireServicePerimeterAction(servicePerimeterName, SamServicePerimeterActions.addProject) {
+      requireProjectAction(projectName, SamBillingProjectActions.addToServicePerimeter) {
+        op
+      }
+    }
+  }
+
+  def addProjectToServicePerimeter(servicePerimeterName: ServicePerimeterName, projectName: RawlsBillingProjectName): Future[PerRequestMessage] = {
+    for {
+      billingProject <- dataSource.inTransaction { dataAccess =>
+        dataAccess.rawlsBillingProjectQuery.load(projectName).map { billingProjectOpt =>
+          billingProjectOpt.getOrElse(throw new RawlsException(s"Sam thinks user has access to project ${projectName.value} but project not found in database"))
+        }
+      }
+
+      _ <- billingProject.servicePerimeter match {
+        case Some(existingServicePerimeter) => Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, s"project ${billingProject.projectName.value} is already in service perimeter $existingServicePerimeter")))
+        case None => Future.successful(())
+      }
+
+      _ <- billingProject.status match {
+        case CreationStatuses.Ready => Future.successful(())
+        case status => Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, s"project ${billingProject.projectName.value} should be Ready but is $status")))
+      }
+
+      googleProjectNumber <- billingProject.googleProjectNumber match {
+        case Some(existingGoogleProjectNumber) => Future.successful(existingGoogleProjectNumber)
+        case None => gcsDAO.getGoogleProject(billingProject.projectName).map(googleProject => GoogleProjectNumber(googleProject.getProjectNumber.toString))
+      }
+
+      _ <- dataSource.inTransaction { dataAccess =>
+        dataAccess.rawlsBillingProjectQuery.updateBillingProjects(Seq(billingProject.copy(status = CreationStatuses.AddingToPerimeter, servicePerimeter = Option(servicePerimeterName), googleProjectNumber = Option(googleProjectNumber))))
+      }
+    } yield RequestComplete(StatusCodes.Accepted)
   }
 }
 
