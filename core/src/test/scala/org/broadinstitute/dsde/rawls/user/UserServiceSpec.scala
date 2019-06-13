@@ -27,6 +27,7 @@ class UserServiceSpec extends FlatSpecLike with TestDriverComponent with Mockito
   val defaultBillingProjectName: RawlsBillingProjectName = RawlsBillingProjectName("test-bp")
   val defaultBillingProject: RawlsBillingProject = RawlsBillingProject(defaultBillingProjectName, defaultCromwellBucketUrl, CreationStatuses.Ready, None, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
   val defaultMockSamDAO: SamDAO = mock[SamDAO]
+  val defaultMockGcsDAO: GoogleServicesDAO = new MockGoogleServicesDAO("test")
   val testConf: Config = ConfigFactory.load()
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.second)
@@ -36,7 +37,7 @@ class UserServiceSpec extends FlatSpecLike with TestDriverComponent with Mockito
     when(defaultMockSamDAO.userHasAction(SamResourceTypeNames.billingProject, defaultBillingProjectName.value, SamBillingProjectActions.addToServicePerimeter, userInfo)).thenReturn(Future.successful(true))
   }
 
-  def getUserService(dataSource: SlickDataSource, samDAO: SamDAO = defaultMockSamDAO, gcsDAO: GoogleServicesDAO = new MockGoogleServicesDAO("test")): UserService = {
+  def getUserService(dataSource: SlickDataSource, samDAO: SamDAO = defaultMockSamDAO, gcsDAO: GoogleServicesDAO = defaultMockGcsDAO): UserService = {
     new UserService(
       userInfo,
       dataSource,
@@ -112,7 +113,7 @@ class UserServiceSpec extends FlatSpecLike with TestDriverComponent with Mockito
   // 403 when user isn't owner of project or project dne
   it should "fail with a 403 when Sam says the user does not have permission on the billing project" in {
     withEmptyTestDatabase { dataSource: SlickDataSource =>
-      val project = defaultBillingProject.copy(status = CreationStatuses.Creating)
+      val project = defaultBillingProject
       runAndWait(rawlsBillingProjectQuery.create(project))
 
       val mockSamDAO = mock[SamDAO]
@@ -130,7 +131,7 @@ class UserServiceSpec extends FlatSpecLike with TestDriverComponent with Mockito
   // 404 when user doesn't have permissions on service-perimeter or s-p dne
   it should "fail with a 404 when Sam says the user does not have permission on the service perimeter" in {
     withEmptyTestDatabase { dataSource: SlickDataSource =>
-      val project = defaultBillingProject.copy(status = CreationStatuses.Creating)
+      val project = defaultBillingProject
       runAndWait(rawlsBillingProjectQuery.create(project))
 
       val mockSamDAO = mock[SamDAO]
