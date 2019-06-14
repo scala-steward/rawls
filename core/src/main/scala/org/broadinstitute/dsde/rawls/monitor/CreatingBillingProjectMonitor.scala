@@ -3,15 +3,19 @@ package org.broadinstitute.dsde.rawls.monitor
 import akka.actor.Status.Failure
 import akka.actor.{Actor, Props}
 import akka.pattern._
+import com.google.api.services.accesscontextmanager.v1beta.model.Operation
 import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.RawlsException
 import org.broadinstitute.dsde.rawls.dataaccess.slick.RawlsBillingProjectOperationRecord
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.monitor.CreatingBillingProjectMonitor._
+import org.broadinstitute.dsde.workbench.util.FutureSupport
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util
+import scala.util.{Success, Try}
 
 /**
  * Created by dvoet on 8/22/16.
@@ -49,7 +53,7 @@ class CreatingBillingProjectMonitorActor(val datasource: SlickDataSource, val gc
   * class's responsibility is to create and update RawlsBillingProjectOperationRecords in Rawls, trigger operations in
   * Google, and keep RawlsBillingProject records up to date with what is actually created/ready/done in Google.
   */
-trait CreatingBillingProjectMonitor extends LazyLogging {
+trait CreatingBillingProjectMonitor extends LazyLogging with FutureSupport {
   implicit val executionContext: ExecutionContext
   val datasource: SlickDataSource
   val gcsDAO: GoogleServicesDAO
@@ -150,19 +154,30 @@ trait CreatingBillingProjectMonitor extends LazyLogging {
           }
         }
         // Initiate operation to overwrite the list of projects in the Perimeter on Google
-        operation <- gcsDAO.accessContextManagerDAO.overwriteProjectsInServicePerimeter(servicePerimeterName, allProjectNumbers)
+        operationTry <- gcsDAO.accessContextManagerDAO.overwriteProjectsInServicePerimeter(servicePerimeterName, allProjectNumbers).toTry
 
-        _ <- datasource.inTransaction { dataAccess =>
-        val (projectsWithProjectNumber, projectsWithoutGoogleProjectNumber) = newProjectsInPerimeter.partition(_.googleProjectNumber.isDefined)
-        for {
-          _ <- dataAccess.rawlsBillingProjectQuery.insertOperations(projectsWithProjectNumber.map { project =>
+        _ <- persistUpdatesFromOperation(operationTry, servicePerimeterName, newProjectsInPerimeter)
+      } yield ()
+    }
+  }
+
+  private def persistUpdatesFromOperation(operationTry: Try[Operation], servicePerimeterName: ServicePerimeterName, newProjectsInPerimeter: Seq[RawlsBillingProject]): Future[Unit] = {
+    datasource.inTransaction { dataAccess =>
+      val (projectsWithProjectNumber, projectsWithoutGoogleProjectNumber) = newProjectsInPerimeter.partition(_.googleProjectNumber.isDefined)
+      for {
+        _ <- operationTry match {
+          case Success(operation) => dataAccess.rawlsBillingProjectQuery.insertOperations(projectsWithProjectNumber.map { project =>
             RawlsBillingProjectOperationRecord(project.projectName.value, GoogleOperationNames.AddProjectToPerimeter, operation.getName, false, None, GoogleApiTypes.AccessContextManagerApi)
           })
-          _ <- dataAccess.rawlsBillingProjectQuery.updateBillingProjects(projectsWithoutGoogleProjectNumber.map { project =>
-            project.copy(status = CreationStatuses.Error, message = Some("Project was in Adding to Perimeter state but google project number did not exist"))
-          })
-        } yield ()
+          case util.Failure(regrets) =>
+            logger.warn(s"Error adding projects ${projectsWithProjectNumber.map(_.projectName.value).mkString} to service perimeter ${servicePerimeterName.value}", regrets)
+            dataAccess.rawlsBillingProjectQuery.updateBillingProjects(projectsWithProjectNumber.map { project =>
+              project.copy(status = CreationStatuses.Error, message = Some(s"Failure adding project to perimeter: ${regrets.getMessage}"))
+            })
         }
+        _ <- dataAccess.rawlsBillingProjectQuery.updateBillingProjects(projectsWithoutGoogleProjectNumber.map { project =>
+          project.copy(status = CreationStatuses.Error, message = Some("Project was in Adding to Perimeter state but google project number did not exist"))
+        })
       } yield ()
     }
   }
@@ -173,6 +188,7 @@ trait CreatingBillingProjectMonitor extends LazyLogging {
     * already been updated with the current state of the operations from Google.  This method will then update the
     * corresponding RawlsBillingProjectRecords if the Google operation has finished, and based on whether the operation
     * succeeded or failed.
+    *
     * @param projects: collection of RawlsBillingProjects that we want to update
     * @param operations: collection of RawlsBillingProjectOperationRecords that reflect the latest operation information
     *                  from Google

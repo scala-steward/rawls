@@ -250,4 +250,27 @@ class CreatingBillingProjectMonitorSpec extends MockitoSugar with FlatSpecLike w
       }
     }
   }
+
+  it should "set project state to 'Error' when call to Google fails" in {
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      val number = GoogleProjectNumber("1")
+      val billingProject = RawlsBillingProject(RawlsBillingProjectName("test-bp"), defaultCromwellBucketUrl, CreationStatuses.AddingToPerimeter, None, None, servicePerimeter = Option(defaultServicePerimeterName), googleProjectNumber = Option(number))
+
+      runAndWait(rawlsBillingProjectQuery.create(billingProject))
+
+      val mockAcmDAO = mock[AccessContextManagerDAO]
+      when(mockAcmDAO.overwriteProjectsInServicePerimeter(defaultServicePerimeterName, Seq(number.value))).thenReturn(Future.failed(new Exception("this failed")))
+
+      val mockGcsDAO = new MockGoogleServicesDAO("test", accessContextManagerDAO = mockAcmDAO)
+      val creatingBillingProjectMonitor = getCreatingBillingProjectMonitor(dataSource, mockGcsDAO)
+
+      assertResult(CheckDone(1)) {
+        Await.result(creatingBillingProjectMonitor.checkCreatingProjects(), Duration.Inf)
+      }
+
+      assertResult(Some(CreationStatuses.Error)) {
+        runAndWait(rawlsBillingProjectQuery.load(billingProject.projectName)).map(_.status)
+      }
+    }
+  }
 }
