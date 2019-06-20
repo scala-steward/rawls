@@ -311,6 +311,10 @@ trait CreatingBillingProjectMonitor extends LazyLogging with FutureSupport {
   }
 
   private def onSuccessfulAddProjectToPerimeter(project: RawlsBillingProject): Future[RawlsBillingProject] = {
+    val folderName = "__REPLACE_ME___@#" // TODO: should use project.servicePerimeter
+    gcsDAO.addProjectToFolder(project.projectName, folderName)
+    // TODO: handle the response from addProjectToFolder and set the project status to Ready or Error accordingly
+
     Future.successful(project.copy(status = CreationStatuses.Ready))
   }
 
