@@ -1098,8 +1098,8 @@ class HttpGoogleServicesDAO(
     val cloudResourceManager = getCloudResourceManager(getBillingServiceAccountCredential)
     val existingProject = executeGoogleRequest(cloudResourceManager.projects().get(projectName.value))
     val folderResourceId = new ResourceId().setType(GoogleResourceTypes.Folder.value).setId(folderName)
-    cloudResourceManager.projects().update(projectName.value, existingProject.setParent(folderResourceId))
-    // TODO: handle the result of the update()
+    // TODO: is `executeGoogleRequest` the right thing to call?  why not `retryWhen500orGoogleError?
+    executeGoogleRequest(cloudResourceManager.projects().update(projectName.value, existingProject.setParent(folderResourceId)))
     Future.successful(())
   }
 }
