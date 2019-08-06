@@ -20,9 +20,9 @@ trait StandardUserInfoDirectives extends UserInfoDirectives {
 
   def requireUserInfo: Directive1[UserInfo] = (
     headerValueByName("OIDC_access_token") &
-      headerValueByName("OIDC_CLAIM_user_id") &
-      headerValueByName("OIDC_CLAIM_expires_in") &
-      headerValueByName("OIDC_CLAIM_email")
+      headerValueByName("OIDC_CLAIM_uid") &
+      headerValueByName("OIDC_CLAIM_exp") &
+      headerValueByName("OIDC_CLAIM_sub")
     ) tflatMap {
     case (token, userId, expiresIn, email) => {
       val userInfo = UserInfo(RawlsUserEmail(email), OAuth2BearerToken(token), expiresIn.toLong, RawlsUserSubjectId(userId))
