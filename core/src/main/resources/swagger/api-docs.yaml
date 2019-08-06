@@ -3404,7 +3404,6 @@ securityDefinitions:
     flow: implicit
     scopes:
       openid: open id authorization
-      https://www.googleapis.com/auth/cloud-billing: cloud billing authorization
 definitions:
   BillingAccount:
     description: 'Details for a single billing account'
