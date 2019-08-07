@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.stream.ActorMaterializer
 import cats.effect._
 import cats.implicits._
@@ -438,8 +439,7 @@ object Boot extends IOApp with LazyLogging {
    * @param gcsDAO
    */
   def enableServiceAccount(gcsDAO: HttpGoogleServicesDAO, samDAO: HttpSamDAO): Unit = {
-    val credential = gcsDAO.getBucketServiceAccountCredential
-    val serviceAccountUserInfo = UserInfo.buildFromTokens(credential)
+    val serviceAccountUserInfo = UserInfo(RawlsUserEmail(""), OAuth2BearerToken(samDAO.getServiceAccountAccessToken), 3600, RawlsUserSubjectId(""))
 
     val registerServiceAccountFuture = samDAO.registerUser(serviceAccountUserInfo)
 

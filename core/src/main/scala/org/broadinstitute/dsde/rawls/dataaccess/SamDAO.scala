@@ -41,6 +41,8 @@ trait SamDAO {
   def deleteUserPetServiceAccount(googleProject: String, userInfo: UserInfo): Future[Unit]
 
   def getStatus(): Future[SubsystemStatus]
+
+  def getServiceAccountAccessToken: String = ""
 }
 
 object SamDAO {

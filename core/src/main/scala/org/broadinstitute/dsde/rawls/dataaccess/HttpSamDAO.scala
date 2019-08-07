@@ -237,7 +237,7 @@ class HttpSamDAO(baseSamServiceURL: String, oktaClientId: String, oktaClientSecr
 
   case class OktaClientTokenResponse(expires_in: Int, access_token: String)
   implicit val OktaClientTokenResponseFormat = jsonFormat2(OktaClientTokenResponse)
-  private def getServiceAccountAccessToken = {
+  override def getServiceAccountAccessToken: String = {
     import akka.http.scaladsl.model.headers._
     import scala.concurrent.duration._
     val tokenResponse = executeRequest[OktaClientTokenResponse](RequestBuilding.Post("https://dev-277992.okta.com/oauth2/default/v1/token", "grant_type=client_credentials&scope=customScope")
