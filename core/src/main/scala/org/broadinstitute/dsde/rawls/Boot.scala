@@ -191,7 +191,8 @@ object Boot extends IOApp with LazyLogging {
       val samConfig = conf.getConfig("sam")
       val samDAO = new HttpSamDAO(
         samConfig.getString("server"),
-        gcsDAO.getBucketServiceAccountCredential
+        samConfig.getString("oktaClientId"),
+        samConfig.getString("oktaClientSecret")
       )
 
       enableServiceAccount(gcsDAO, samDAO)

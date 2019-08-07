@@ -33,21 +33,21 @@ class HttpSamDAOSpec extends TestKit(ActorSystem("HttpSamDAOSpec"))
   }
 
   "HttpSamDAO" should "handle no content getting access instructions" in {
-    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, new MockGoogleCredential.Builder().build())
+    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, "", "")
     assertResult(None) {
       Await.result(dao.getAccessInstructions(WorkbenchGroupName("no_instructions"), UserInfo(RawlsUserEmail(""), OAuth2BearerToken(""), 0, RawlsUserSubjectId(""))), Duration.Inf)
     }
   }
 
   it should "handle no content getting user id info" in {
-    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, new MockGoogleCredential.Builder().build())
+    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, "", "")
     assertResult(SamDAO.NotUser) {
       Await.result(dao.getUserIdInfo("group@example.com", UserInfo(RawlsUserEmail(""), OAuth2BearerToken(""), 0, RawlsUserSubjectId(""))), Duration.Inf)
     }
   }
 
   it should "handle 404 getting user id info" in {
-    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, new MockGoogleCredential.Builder().build())
+    val dao = new HttpSamDAO(mockServer.mockServerBaseUrl, "", "")
     assertResult(SamDAO.NotFound) {
       Await.result(dao.getUserIdInfo("dne@example.com", UserInfo(RawlsUserEmail(""), OAuth2BearerToken(""), 0, RawlsUserSubjectId(""))), Duration.Inf)
     }

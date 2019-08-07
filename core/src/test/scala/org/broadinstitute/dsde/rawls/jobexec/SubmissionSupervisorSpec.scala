@@ -28,7 +28,7 @@ class SubmissionSupervisorSpec extends TestKit(ActorSystem("SubmissionSupervisor
 
   val mockServer = RemoteServicesMockServer()
   val gcsDAO = new MockGoogleServicesDAO("test")
-  val mockSamDAO = new HttpSamDAO(mockServer.mockServerBaseUrl, gcsDAO.getPreparedMockGoogleCredential())
+  val mockSamDAO = new HttpSamDAO(mockServer.mockServerBaseUrl, "", "")
 
   override def beforeAll(): Unit = {
     super.beforeAll()

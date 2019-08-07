@@ -10,7 +10,6 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.http.scaladsl.unmarshalling.{Unmarshal, Unmarshaller}
 import akka.stream.Materializer
-import com.google.api.client.auth.oauth2.Credential
 import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
 import org.broadinstitute.dsde.rawls.model.UserAuthJsonSupport._
@@ -23,13 +22,13 @@ import org.broadinstitute.dsde.workbench.model.{WorkbenchEmail, WorkbenchGroupNa
 import spray.json.DefaultJsonProtocol._
 import spray.json.{DefaultJsonProtocol, JsValue, RootJsonReader}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 /**
   * Created by mbemis on 9/11/17.
   */
-class HttpSamDAO(baseSamServiceURL: String, serviceAccountCreds: Credential)(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext)
+class HttpSamDAO(baseSamServiceURL: String, oktaClientId: String, oktaClientSecret: String)(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext)
   extends SamDAO with DsdeHttpDAO with Retry with LazyLogging with ServiceDAOWithStatus with FutureSupport {
 
   override val http = Http(system)
@@ -236,12 +235,16 @@ class HttpSamDAO(baseSamServiceURL: String, serviceAccountCreds: Credential)(imp
     retry(when401or500) { () => pipeline[String](userInfo) apply RequestBuilding.Get(url) }
   }
 
+  case class OktaClientTokenResponse(expires_in: Int, access_token: String)
+  implicit val OktaClientTokenResponseFormat = jsonFormat2(OktaClientTokenResponse)
   private def getServiceAccountAccessToken = {
-    val expiresInSeconds = Option(serviceAccountCreds.getExpiresInSeconds).map(_.longValue()).getOrElse(0L)
-    if (expiresInSeconds < 60*5) {
-      serviceAccountCreds.refreshToken()
-    }
-    serviceAccountCreds.getAccessToken
+    import akka.http.scaladsl.model.headers._
+    import scala.concurrent.duration._
+    val tokenResponse = executeRequest[OktaClientTokenResponse](RequestBuilding.Post("https://dev-277992.okta.com/oauth2/default/v1/token", "grant_type=client_credentials&scope=customScope")
+      .addHeader(Authorization(BasicHttpCredentials(oktaClientId, oktaClientSecret)))
+      .addHeader(`Cache-Control`(CacheDirectives.`no-cache`)))
+
+    Await.result(tokenResponse, 1 minute).access_token
   }
 
   override def getResourceAuthDomain(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Seq[String]] = {
