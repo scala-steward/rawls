@@ -1,5 +1,9 @@
 package org.broadinstitute.dsde.rawls.dataaccess
 
+import java.io.{BufferedReader, InputStreamReader}
+import java.net.{HttpURLConnection, URL}
+import java.util.Base64
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding
@@ -238,13 +242,37 @@ class HttpSamDAO(baseSamServiceURL: String, oktaClientId: String, oktaClientSecr
   case class OktaClientTokenResponse(expires_in: Int, access_token: String)
   implicit val OktaClientTokenResponseFormat = jsonFormat2(OktaClientTokenResponse)
   override def getServiceAccountAccessToken: String = {
-    import akka.http.scaladsl.model.headers._
-    import scala.concurrent.duration._
-    val tokenResponse = executeRequest[OktaClientTokenResponse](RequestBuilding.Post("https://dev-277992.okta.com/oauth2/default/v1/token", "grant_type=client_credentials&scope=customScope")
-      .addHeader(Authorization(BasicHttpCredentials(oktaClientId, oktaClientSecret)))
-      .addHeader(`Cache-Control`(CacheDirectives.`no-cache`)))
+//    import akka.http.scaladsl.model.headers._
+//    import scala.concurrent.duration._
+//    val request = RequestBuilding.Post("https://dev-277992.okta.com/oauth2/default/v1/token?grant_type=client_credentials&scope=customScope")
+//      .addHeader(Accept(MediaRange(MediaTypes.`application/json`)))
+//      .addHeader(Authorization(BasicHttpCredentials(oktaClientId, oktaClientSecret)))
+//      .addHeader(`Cache-Control`(CacheDirectives.`no-cache`))
+//      .addHeader(RawHeader("content-type", "application/x-www-form-urlencoded"))
+//
+//    val tokenResponse = executeRequest[OktaClientTokenResponse](request)
+//
+//    Await.result(tokenResponse, 1 minute).access_token
 
-    Await.result(tokenResponse, 1 minute).access_token
+    val url = new URL("https://dev-277992.okta.com/oauth2/default/v1/token?grant_type=client_credentials&scope=customScope")
+    val conn: HttpURLConnection= url.openConnection().asInstanceOf[HttpURLConnection]
+
+    conn.setDoOutput(true)
+    conn.setRequestProperty("Authorization", s"Basic ${Base64.getEncoder.encodeToString((oktaClientId + ":" + oktaClientSecret).getBytes)}")
+    conn.setRequestProperty("accept", "application/json")
+    conn.setRequestProperty("cache-control", "no-cache")
+    conn.setRequestProperty("content-type", "application/x-www-form-urlencoded")
+    conn.setRequestMethod("POST")
+
+    try {
+      conn.connect()
+
+      import spray.json._
+      new BufferedReader(new InputStreamReader(conn.getInputStream)).readLine().parseJson.convertTo[OktaClientTokenResponse].access_token
+    } finally {
+      conn.getInputStream.close()
+      conn.disconnect()
+    }
   }
 
   override def getResourceAuthDomain(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Seq[String]] = {
