@@ -8,10 +8,12 @@ import com.google.common.base.Throwables
 import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.dataaccess.slick.{DataAccess, DataAccessComponent, ReadWriteAction}
 import sun.security.provider.certpath.SunCertPathBuilderException
+
 import scala.concurrent.{ExecutionContext, Future}
 import liquibase.{Contexts, Liquibase}
 import liquibase.database.jvm.JdbcConnection
 import liquibase.resource.{ClassLoaderResourceAccessor, ResourceAccessor}
+import org.joda.time.{DateTime, Seconds}
 
 object DataSource {
   def apply(databaseConfig: DatabaseConfig[JdbcProfile])(implicit executionContext: ExecutionContext): SlickDataSource = {
@@ -27,7 +29,11 @@ class SlickDataSource(val databaseConfig: DatabaseConfig[JdbcProfile])(implicit 
   import dataAccess.driver.api._
 
   def inTransaction[T](f: (DataAccess) => ReadWriteAction[T], isolationLevel: TransactionIsolation = TransactionIsolation.RepeatableRead): Future[T] = {
-    database.run(f(dataAccess).transactionally.withTransactionIsolation(isolationLevel))
+    for {
+      start <- Future.successful(DateTime.now)
+      result <- database.run(f(dataAccess).transactionally.withTransactionIsolation(isolationLevel))
+      _ <- Future.successful(s"RAWLSDBPERF txn time ${Seconds.secondsBetween(start, DateTime.now)}s")
+    } yield result
   }
 
   def initWithLiquibase(liquibaseChangeLog: String, parameters: Map[String, AnyRef]) = {
