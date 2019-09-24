@@ -32,7 +32,7 @@ class SlickDataSource(val databaseConfig: DatabaseConfig[JdbcProfile])(implicit 
     for {
       start <- Future.successful(DateTime.now)
       result <- database.run(f(dataAccess).transactionally.withTransactionIsolation(isolationLevel))
-      _ <- Future.successful(s"RAWLSDBPERF txn time ${Seconds.secondsBetween(start, DateTime.now)}s")
+      _ <- Future.successful(println(s"RAWLSDBPERF txn time ${Seconds.secondsBetween(start, DateTime.now)}s"))
     } yield result
   }
 
