@@ -39,6 +39,11 @@ import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 import cats.implicits._
 
+import io.opencensus.trace.{Span, Status}
+import io.opencensus.scala.Tracing._
+
+
+
 /**
  * Created by dvoet on 4/27/15.
  */
@@ -142,14 +147,26 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   def AdminAbortSubmission(workspaceName: WorkspaceName, submissionId: String) = adminAbortSubmission(workspaceName,submissionId)
   def AdminWorkflowQueueStatusByUser = adminWorkflowQueueStatusByUser()
 
-  def createWorkspace(workspaceRequest: WorkspaceRequest): Future[Workspace] =
-    withAttributeNamespaceCheck(workspaceRequest) {
-      dataSource.inTransaction({ dataAccess =>
-        withNewWorkspaceContext(workspaceRequest, dataAccess) { workspaceContext =>
+  def createWorkspace(workspaceRequest: WorkspaceRequest): Future[Workspace] = {
+
+    // TODO: KCIBUL - neaten this up
+    val span = startSpan("createWorkspace")
+
+    trace("createWorkspace")( span => withAttributeNamespaceCheck(workspaceRequest) {
+      traceWithParent("withNewWorkspaceContext",span)( s2 => dataSource.inTransaction({ dataAccess =>
+        withNewWorkspaceContext(workspaceRequest, dataAccess, s2) { workspaceContext =>
           DBIO.successful(workspaceContext.workspace)
         }
-      }, TransactionIsolation.ReadCommitted) // read committed to avoid deadlocks on workspace attr scratch table
-    }
+      }, TransactionIsolation.ReadCommitted) )// read committed to avoid deadlocks on workspace attr scratch table
+    })
+
+//    f.onComplete {
+//      case Success(_) => endSpan(span, Status.OK)
+//      case Failure(e) => endSpan(span, Status.UNKNOWN)
+//    }
+//
+//    f
+  }
 
   /** Returns the Set of legal field names supplied by the user, trimmed of whitespace.
     * Throws an error if the user supplied an unrecognized field name.
@@ -1920,7 +1937,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     }
   }
 
-  private def withNewWorkspaceContext[T](workspaceRequest: WorkspaceRequest, dataAccess: DataAccess)
+  private def withNewWorkspaceContext[T](workspaceRequest: WorkspaceRequest, dataAccess: DataAccess, span: Span = startSpan("withNewWorkspaceContext-implied"))
                                      (op: (SlickWorkspaceContext) => ReadWriteAction[T]): ReadWriteAction[T] = {
 
     def getBucketName(workspaceId: String, secure: Boolean) = s"${config.workspaceBucketNamePrefix}-${if(secure) "secure-" else ""}${workspaceId}"
@@ -1929,7 +1946,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       case ads => Map(WorkspaceService.SECURITY_LABEL_KEY -> WorkspaceService.HIGH_SECURITY_LABEL) ++ ads.map(ad => gcsDAO.labelSafeString(ad.membersGroupName.value, "ad-") -> "")
     }
 
-    def saveNewWorkspace(workspaceId: String, workspaceRequest: WorkspaceRequest, bucketName: String, dataAccess: DataAccess): ReadWriteAction[Workspace] = {
+    def saveNewWorkspace(workspaceId: String, workspaceRequest: WorkspaceRequest, bucketName: String, dataAccess: DataAccess, mySpan: Span = span): ReadWriteAction[Workspace] = {
       val currentDate = DateTime.now
 
       val workspace = Workspace(
@@ -1944,9 +1961,9 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         attributes = workspaceRequest.attributes
       )
 
-      dataAccess.workspaceQuery.save(workspace).flatMap { _ =>
+      OpenCensusUtils.traceDBIOWithParent("save",mySpan)(_ => dataAccess.workspaceQuery.save(workspace)).flatMap { _ =>
         for {
-          projectOwnerEmail <- DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, workspaceRequest.namespace, SamBillingProjectPolicyNames.owner, userInfo))
+          projectOwnerEmail <- OpenCensusUtils.traceDBIOWithParent("getPolicySyncStatus",mySpan)(_ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, workspaceRequest.namespace, SamBillingProjectPolicyNames.owner, userInfo)))
           policies <- {
             val projectOwnerPolicy = SamWorkspacePolicyNames.projectOwner -> SamPolicy(Set(projectOwnerEmail.email), Set.empty, Set(SamWorkspaceRoles.owner, SamWorkspaceRoles.projectOwner))
             val ownerPolicy = SamWorkspacePolicyNames.owner -> SamPolicy(Set(WorkbenchEmail(userInfo.userEmail.value)), Set.empty, Set(SamWorkspaceRoles.owner))
@@ -1959,10 +1976,10 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
             val defaultPolicies = Map(projectOwnerPolicy, ownerPolicy, writerPolicy, readerPolicy, shareReaderPolicy, shareWriterPolicy, canComputePolicy, canCatalogPolicy)
 
-            DBIO.from(samDAO.createResourceFull(SamResourceTypeNames.workspace, workspaceId, defaultPolicies, workspaceRequest.authorizationDomain.getOrElse(Set.empty).map(_.membersGroupName.value), userInfo)).map(_ => defaultPolicies)
+            OpenCensusUtils.traceDBIOWithParent("createResourceFull",mySpan)(_ => DBIO.from(samDAO.createResourceFull(SamResourceTypeNames.workspace, workspaceId, defaultPolicies, workspaceRequest.authorizationDomain.getOrElse(Set.empty).map(_.membersGroupName.value), userInfo)).map(_ => defaultPolicies))
           }
-          _ <- DBIO.from(createWorkflowCollectionForWorkspace(workspaceId))
-          _ <- DBIO.from(Future.traverse(policies.toSeq) { case (policyName, _) =>
+          _ <- OpenCensusUtils.traceDBIOWithParent("createWorkflowCollectionForWorkspace",mySpan)(_ => DBIO.from(createWorkflowCollectionForWorkspace(workspaceId)))
+          _ <- OpenCensusUtils.traceDBIOWithParent("traverse",mySpan)(_ => DBIO.from(Future.traverse(policies.toSeq) { case (policyName, _) =>
             if (policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
               // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
               // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
@@ -1971,27 +1988,27 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
             } else if (WorkspaceAccessLevels.withPolicyName(policyName.value).isDefined) {
               // only sync policies that have corresponding WorkspaceAccessLevels to google because only those are
               // granted bucket access (and thus need a google group)
-              samDAO.syncPolicyToGoogle(SamResourceTypeNames.workspace, workspaceId, policyName)
+              traceWithParent(s"syncPolicy-${policyName}", mySpan)( _ => samDAO.syncPolicyToGoogle(SamResourceTypeNames.workspace, workspaceId, policyName))
             } else {
               Future.successful(())
             }
-          })
+          }))
         } yield workspace
       }
     }
 
 
-    requireCreateWorkspaceAccess(workspaceRequest, dataAccess) {
-      dataAccess.workspaceQuery.findByName(workspaceRequest.toWorkspaceName) flatMap {
+    OpenCensusUtils.traceDBIOWithParent("requireCreateWorkspaceAccess", span)( s2 => requireCreateWorkspaceAccess(workspaceRequest, dataAccess, s2) {
+      OpenCensusUtils.traceDBIOWithParent("findByName", s2)( _ => dataAccess.workspaceQuery.findByName(workspaceRequest.toWorkspaceName)) flatMap {
         case Some(_) => DBIO.failed(new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.Conflict, s"Workspace ${workspaceRequest.namespace}/${workspaceRequest.name} already exists")))
         case None =>
           val workspaceId = UUID.randomUUID.toString
           val bucketName = getBucketName(workspaceId, workspaceRequest.authorizationDomain.exists(_.nonEmpty))
-          saveNewWorkspace(workspaceId, workspaceRequest, bucketName, dataAccess).flatMap { savedWorkspace =>
+          OpenCensusUtils.traceDBIOWithParent("saveNewWorkspace", s2)( s3 => saveNewWorkspace(workspaceId, workspaceRequest, bucketName, dataAccess, s3).flatMap { savedWorkspace =>
             for {
-              project <- dataAccess.rawlsBillingProjectQuery.load(RawlsBillingProjectName(workspaceRequest.namespace))
-              projectOwnerGroupEmail <- DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, project.get.projectName.value, SamBillingProjectPolicyNames.owner, userInfo).map(_.email))
-              policyEmails <- DBIO.from(samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo).map(_.flatMap(policy =>
+              project <- OpenCensusUtils.traceDBIOWithParent("loadBillingProject", s3)( _ => dataAccess.rawlsBillingProjectQuery.load(RawlsBillingProjectName(workspaceRequest.namespace)))
+              projectOwnerGroupEmail <- OpenCensusUtils.traceDBIOWithParent("getPolicySyncStatus", s3)( _ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, project.get.projectName.value, SamBillingProjectPolicyNames.owner, userInfo).map(_.email)))
+              policyEmails <- OpenCensusUtils.traceDBIOWithParent("listPoliciesForResource", s3)( _ => DBIO.from(samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo).map(_.flatMap(policy =>
                 if(policy.policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
                   // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
                   // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
@@ -1999,25 +2016,25 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
                   Option(WorkspaceAccessLevels.ProjectOwner -> projectOwnerGroupEmail)
                 } else {
                   WorkspaceAccessLevels.withPolicyName(policy.policyName.value).map(_ -> policy.email)
-                }).toMap))
-              _ <- DBIO.from(gcsDAO.setupWorkspace(userInfo, project.get, policyEmails, bucketName, getLabels(workspaceRequest.authorizationDomain.getOrElse(Set.empty).toList)))
-              response <- op(SlickWorkspaceContext(savedWorkspace))
+                }).toMap)))
+              _ <- OpenCensusUtils.traceDBIOWithParent("setupWorkspace", s3)( _ => DBIO.from(gcsDAO.setupWorkspace(userInfo, project.get, policyEmails, bucketName, getLabels(workspaceRequest.authorizationDomain.getOrElse(Set.empty).toList))))
+              response <- OpenCensusUtils.traceDBIOWithParent("doOp", s3)( _ => op(SlickWorkspaceContext(savedWorkspace)))
             } yield response
-          }
+          })
       }
-    }
+    })
   }
 
   private def noSuchWorkspaceMessage(workspaceName: WorkspaceName) = s"${workspaceName} does not exist"
   private def accessDeniedMessage(workspaceName: WorkspaceName) = s"insufficient permissions to perform operation on ${workspaceName}"
 
-  private def requireCreateWorkspaceAccess[T](workspaceRequest: WorkspaceRequest, dataAccess: DataAccess)(op: => ReadWriteAction[T]): ReadWriteAction[T] = {
+  private def requireCreateWorkspaceAccess[T](workspaceRequest: WorkspaceRequest, dataAccess: DataAccess, mySpan: Span)(op: => ReadWriteAction[T]): ReadWriteAction[T] = {
     val projectName = RawlsBillingProjectName(workspaceRequest.namespace)
     for {
-      userHasAction <- DBIO.from(samDAO.userHasAction(SamResourceTypeNames.billingProject, projectName.value, SamBillingProjectActions.createWorkspace, userInfo))
+      userHasAction <- OpenCensusUtils.traceDBIOWithParent("userHasAction", mySpan)( _ => DBIO.from(samDAO.userHasAction(SamResourceTypeNames.billingProject, projectName.value, SamBillingProjectActions.createWorkspace, userInfo)))
       response <- userHasAction match {
         case true =>
-          dataAccess.rawlsBillingProjectQuery.load(projectName).flatMap {
+          OpenCensusUtils.traceDBIOWithParent("rawlsBillingProjectQueryLoad", mySpan)( _ => dataAccess.rawlsBillingProjectQuery.load(projectName)).flatMap {
             case Some(RawlsBillingProject(_, _, CreationStatuses.Ready, _, _, _, _, _)) => op //Sam will check to make sure the Auth Domain selection is valid
             case Some(RawlsBillingProject(RawlsBillingProjectName(name), _, CreationStatuses.Creating, _, _, _, _, _)) =>
               DBIO.failed(new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, s"${name} is still being created")))

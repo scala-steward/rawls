@@ -25,6 +25,8 @@ trait WorkspaceApiService extends UserInfoDirectives {
   import PerRequest.requestCompleteMarshaller
   implicit val executionContext: ExecutionContext
 
+ import io.opencensus.scala.akka.http.TracingDirective._
+
   val workspaceServiceConstructor: UserInfo => WorkspaceService
 
   val workspaceRoutes: server.Route = requireUserInfo() { userInfo =>
@@ -32,8 +34,10 @@ trait WorkspaceApiService extends UserInfoDirectives {
       post {
         entity(as[WorkspaceRequest]) { workspace =>
           addLocationHeader(workspace.path) {
-            complete {
-              workspaceServiceConstructor(userInfo).CreateWorkspace(workspace).map(w => StatusCodes.Created -> WorkspaceDetails(w, workspace.authorizationDomain.getOrElse(Set.empty)))
+            traceRequest { span =>
+              complete {
+                workspaceServiceConstructor(userInfo).CreateWorkspace(workspace).map(w => StatusCodes.Created -> WorkspaceDetails(w, workspace.authorizationDomain.getOrElse(Set.empty)))
+              }
             }
           }
         }
