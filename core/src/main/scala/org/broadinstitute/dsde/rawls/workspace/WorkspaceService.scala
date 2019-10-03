@@ -1915,11 +1915,11 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     withAttributeNamespaceCheck(attrNames)(op)
   }
 
-  private def createWorkflowCollectionForWorkspace(workspaceId: String) = {
+  private def createWorkflowCollectionForWorkspace(workspaceId: String, span: Span) = {
     for {
-      workspacePolicies <- samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo)
+      workspacePolicies <- traceWithParent("listPolicies",span)( _ => samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo))
       policyMap = workspacePolicies.map(pol => pol.policyName -> pol.email).toMap
-      _ <- samDAO.createResourceFull(
+      _ <- traceWithParent("createResourceFull",span)( _ => samDAO.createResourceFull(
               SamResourceTypeNames.workflowCollection,
               workspaceId,
               Map(
@@ -1932,7 +1932,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
               ),
               Set.empty,
               userInfo
-            )
+            ))
     } yield {
     }
   }
@@ -1978,7 +1978,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
             OpenCensusUtils.traceDBIOWithParent("createResourceFull",mySpan)(_ => DBIO.from(samDAO.createResourceFull(SamResourceTypeNames.workspace, workspaceId, defaultPolicies, workspaceRequest.authorizationDomain.getOrElse(Set.empty).map(_.membersGroupName.value), userInfo)).map(_ => defaultPolicies))
           }
-          _ <- OpenCensusUtils.traceDBIOWithParent("createWorkflowCollectionForWorkspace",mySpan)(_ => DBIO.from(createWorkflowCollectionForWorkspace(workspaceId)))
+          _ <- OpenCensusUtils.traceDBIOWithParent("createWorkflowCollectionForWorkspace",mySpan)(mySpan2 => DBIO.from(createWorkflowCollectionForWorkspace(workspaceId, mySpan2)))
           _ <- OpenCensusUtils.traceDBIOWithParent("traverse",mySpan)(_ => DBIO.from(Future.traverse(policies.toSeq) { case (policyName, _) =>
             if (policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
               // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
@@ -1989,6 +1989,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
               // only sync policies that have corresponding WorkspaceAccessLevels to google because only those are
               // granted bucket access (and thus need a google group)
               traceWithParent(s"syncPolicy-${policyName}", mySpan)( _ => samDAO.syncPolicyToGoogle(SamResourceTypeNames.workspace, workspaceId, policyName))
+              Future.successful(())
             } else {
               Future.successful(())
             }
