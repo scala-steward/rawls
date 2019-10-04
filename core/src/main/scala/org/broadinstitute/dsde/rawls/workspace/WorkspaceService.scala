@@ -2009,7 +2009,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
             for {
               project <- OpenCensusUtils.traceDBIOWithParent("loadBillingProject", s3)( _ => dataAccess.rawlsBillingProjectQuery.load(RawlsBillingProjectName(workspaceRequest.namespace)))
               projectOwnerGroupEmail <- OpenCensusUtils.traceDBIOWithParent("getPolicySyncStatus", s3)( _ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, project.get.projectName.value, SamBillingProjectPolicyNames.owner, userInfo).map(_.email)))
-              policyEmails <- OpenCensusUtils.traceDBIOWithParent("listPoliciesForResource", s3)( _ => DBIO.from(samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo).map(_.flatMap(policy =>
+              policyEmails <- OpenCensusUtils.traceDBIOWithParent("listPoliciesForResource", s3)( _ => DBIO.from(samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo, true).map(_.flatMap(policy =>
                 if(policy.policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
                   // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
                   // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
