@@ -1917,7 +1917,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
   private def createWorkflowCollectionForWorkspace(workspaceId: String, span: Span) = {
     for {
-      workspacePolicies <- traceWithParent("listPolicies",span)( _ => samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo))
+      workspacePolicies <- traceWithParent("listPolicies",span)( _ => samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo, true))
       policyMap = workspacePolicies.map(pol => pol.policyName -> pol.email).toMap
       _ <- traceWithParent("createResourceFull",span)( _ => samDAO.createResourceFull(
               SamResourceTypeNames.workflowCollection,

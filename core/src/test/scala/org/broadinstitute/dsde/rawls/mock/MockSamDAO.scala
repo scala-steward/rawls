@@ -56,7 +56,7 @@ class MockSamDAO(dataSource: SlickDataSource)(implicit executionContext: Executi
     }
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Set[SamPolicyWithNameAndEmail]] = Future.successful(
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = Future.successful(
     resourceTypeName match {
       case SamResourceTypeNames.workspace =>
         Set(SamWorkspacePolicyNames.projectOwner,
@@ -121,7 +121,7 @@ class CustomizableMockSamDAO(dataSource: SlickDataSource)(implicit executionCont
     Future.successful(invitedUsers.put(userEmail, userEmail))
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Set[SamPolicyWithNameAndEmail]] = {
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = {
     policies.get((resourceTypeName, resourceId)) match {
       case Some(foundPolicies) => Future.successful(foundPolicies.values.toSet)
       case None => super.listPoliciesForResource(resourceTypeName, resourceId, userInfo)

@@ -95,8 +95,9 @@ class HttpSamDAO(baseSamServiceURL: String, serviceAccountCreds: Credential)(imp
     doSuccessOrFailureRequest(httpRequest, userInfo)
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Set[SamPolicyWithNameAndEmail]] = {
-    val url = samServiceURL + s"/api/resources/v1/${resourceTypeName.value}/$resourceId/policies"
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = {
+    val queryString = if (noMembers) { "?noMembers" } else { "" }
+    val url = samServiceURL + s"/api/resources/v1/${resourceTypeName.value}/$resourceId/policies$queryString"
 
     retry(when401or500) { () =>
       pipeline[Set[SamPolicyWithNameAndEmail]](userInfo) apply RequestBuilding.Get(url)
