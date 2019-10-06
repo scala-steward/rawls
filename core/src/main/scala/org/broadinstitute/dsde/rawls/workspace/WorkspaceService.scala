@@ -79,7 +79,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
   import dataSource.dataAccess.driver.api._
 
-  def CreateWorkspace(workspace: WorkspaceRequest) = createWorkspace(workspace)
+  def CreateWorkspace(workspace: WorkspaceRequest, parentSpan: Span = null) = createWorkspace(workspace, parentSpan)
   def GetWorkspace(workspaceName: WorkspaceName, params: WorkspaceFieldSpecs) = getWorkspace(workspaceName, params)
   def DeleteWorkspace(workspaceName: WorkspaceName) = deleteWorkspace(workspaceName)
   def UpdateWorkspace(workspaceName: WorkspaceName, operations: Seq[AttributeUpdateOperation]) = updateWorkspace(workspaceName, operations)
@@ -147,25 +147,14 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   def AdminAbortSubmission(workspaceName: WorkspaceName, submissionId: String) = adminAbortSubmission(workspaceName,submissionId)
   def AdminWorkflowQueueStatusByUser = adminWorkflowQueueStatusByUser()
 
-  def createWorkspace(workspaceRequest: WorkspaceRequest): Future[Workspace] = {
-
-    // TODO: KCIBUL - neaten this up
-    val span = startSpan("createWorkspace")
-
-    trace("createWorkspace")( span => withAttributeNamespaceCheck(workspaceRequest) {
+  def createWorkspace(workspaceRequest: WorkspaceRequest, parentSpan: Span = null): Future[Workspace] = {
+    traceWithParent("createWorkspace", parentSpan)( span => withAttributeNamespaceCheck(workspaceRequest) {
       traceWithParent("withNewWorkspaceContext",span)( s2 => dataSource.inTransaction({ dataAccess =>
         withNewWorkspaceContext(workspaceRequest, dataAccess, s2) { workspaceContext =>
           DBIO.successful(workspaceContext.workspace)
         }
       }, TransactionIsolation.ReadCommitted) )// read committed to avoid deadlocks on workspace attr scratch table
     })
-
-//    f.onComplete {
-//      case Success(_) => endSpan(span, Status.OK)
-//      case Failure(e) => endSpan(span, Status.UNKNOWN)
-//    }
-//
-//    f
   }
 
   /** Returns the Set of legal field names supplied by the user, trimmed of whitespace.
@@ -1939,6 +1928,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
   private def withNewWorkspaceContext[T](workspaceRequest: WorkspaceRequest, dataAccess: DataAccess, span: Span = startSpan("withNewWorkspaceContext-implied"))
                                      (op: (SlickWorkspaceContext) => ReadWriteAction[T]): ReadWriteAction[T] = {
+    import io.opencensus.trace.AttributeValue
 
     def getBucketName(workspaceId: String, secure: Boolean) = s"${config.workspaceBucketNamePrefix}-${if(secure) "secure-" else ""}${workspaceId}"
     def getLabels(authDomain: List[ManagedGroupRef]) = authDomain match {
@@ -2005,6 +1995,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         case None =>
           val workspaceId = UUID.randomUUID.toString
           val bucketName = getBucketName(workspaceId, workspaceRequest.authorizationDomain.exists(_.nonEmpty))
+          s2.putAttribute("workspaceId", AttributeValue.stringAttributeValue(workspaceId))
           OpenCensusUtils.traceDBIOWithParent("saveNewWorkspace", s2)( s3 => saveNewWorkspace(workspaceId, workspaceRequest, bucketName, dataAccess, s3).flatMap { savedWorkspace =>
             for {
               project <- OpenCensusUtils.traceDBIOWithParent("loadBillingProject", s3)( _ => dataAccess.rawlsBillingProjectQuery.load(RawlsBillingProjectName(workspaceRequest.namespace)))
