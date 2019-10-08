@@ -7,6 +7,7 @@ import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
 import akka.http.scaladsl.unmarshalling.{Unmarshal, Unmarshaller}
 import akka.stream.Materializer
 import com.typesafe.scalalogging.LazyLogging
+import io.opencensus.trace.Span
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
 import org.broadinstitute.dsde.rawls.model.{ErrorReport, UserInfo}
 import org.broadinstitute.dsde.rawls.util.{HttpClientUtils, HttpClientUtilsStandard}
@@ -31,7 +32,7 @@ trait DsdeHttpDAO extends LazyLogging {
     httpClientUtils.executeRequestUnmarshalResponse[T](http, httpRequest)
   }
 
-  protected def executeRequestAsUser[T](userInfo: UserInfo)(httpRequest: HttpRequest)(implicit um: Unmarshaller[ResponseEntity, T]): Future[T] = {
+  protected def executeRequestAsUser[T](userInfo: UserInfo)(httpRequest: HttpRequest)(implicit um: Unmarshaller[ResponseEntity, T], parentSpan: Span = null): Future[T] = {
     httpClientUtils.executeRequestUnmarshalResponse[T](http, httpClientUtils.addHeader(httpRequest, authHeader(userInfo)))
   }
 
@@ -39,7 +40,7 @@ trait DsdeHttpDAO extends LazyLogging {
     httpClientUtils.executeRequestUnmarshalResponse[T](http, httpClientUtils.addHeader(httpRequest, authHeader(accessToken)))
   }
 
-  protected def pipeline[A](userInfo: UserInfo)(implicit um: Unmarshaller[ResponseEntity, A]) = executeRequestAsUser[A](userInfo) _
+  protected def pipeline[A](userInfo: UserInfo)(implicit um: Unmarshaller[ResponseEntity, A], parentSpan: Span = null) = executeRequestAsUser[A](userInfo) _
 
   protected def pipeline[A](implicit um: Unmarshaller[ResponseEntity, A]) = executeRequest[A] _
 

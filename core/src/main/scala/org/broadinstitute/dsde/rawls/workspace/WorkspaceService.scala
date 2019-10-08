@@ -1904,10 +1904,11 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     withAttributeNamespaceCheck(attrNames)(op)
   }
 
-  private def createWorkflowCollectionForWorkspace(workspaceId: String, span: Span) = {
+  private def createWorkflowCollectionForWorkspace(workspaceId: String, policyMap: Map[SamResourcePolicyName, WorkbenchEmail], span: Span) = {
     for {
-      workspacePolicies <- traceWithParent("listPolicies",span)( _ => samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo, true))
-      policyMap = workspacePolicies.map(pol => pol.policyName -> pol.email).toMap
+      //workspacePolicies <- traceWithParent("listPolicies",span)( s2 => samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo, true)(s2))
+      //policyMap = workspacePolicies.map(pol => pol.policyName -> pol.email).toMap
+
       _ <- traceWithParent("createResourceFull",span)( _ => samDAO.createResourceFull(
               SamResourceTypeNames.workflowCollection,
               workspaceId,
@@ -1936,7 +1937,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       case ads => Map(WorkspaceService.SECURITY_LABEL_KEY -> WorkspaceService.HIGH_SECURITY_LABEL) ++ ads.map(ad => gcsDAO.labelSafeString(ad.membersGroupName.value, "ad-") -> "")
     }
 
-    def saveNewWorkspace(workspaceId: String, workspaceRequest: WorkspaceRequest, bucketName: String, dataAccess: DataAccess, mySpan: Span = span): ReadWriteAction[Workspace] = {
+    def saveNewWorkspace(workspaceId: String, workspaceRequest: WorkspaceRequest, bucketName: String, dataAccess: DataAccess, mySpan: Span = span): ReadWriteAction[(Workspace, Map[SamResourcePolicyName, WorkbenchEmail])] = {
       val currentDate = DateTime.now
 
       val workspace = Workspace(
@@ -1954,7 +1955,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       OpenCensusUtils.traceDBIOWithParent("save",mySpan)(_ => dataAccess.workspaceQuery.save(workspace)).flatMap { _ =>
         for {
           projectOwnerEmail <- OpenCensusUtils.traceDBIOWithParent("getPolicySyncStatus",mySpan)(_ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, workspaceRequest.namespace, SamBillingProjectPolicyNames.owner, userInfo)))
-          policies <- {
+          resource <- {
             val projectOwnerPolicy = SamWorkspacePolicyNames.projectOwner -> SamPolicy(Set(projectOwnerEmail.email), Set.empty, Set(SamWorkspaceRoles.owner, SamWorkspaceRoles.projectOwner))
             val ownerPolicy = SamWorkspacePolicyNames.owner -> SamPolicy(Set(WorkbenchEmail(userInfo.userEmail.value)), Set.empty, Set(SamWorkspaceRoles.owner))
             val writerPolicy = SamWorkspacePolicyNames.writer -> SamPolicy(Set.empty, Set.empty, Set(SamWorkspaceRoles.writer))
@@ -1966,25 +1967,34 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
             val defaultPolicies = Map(projectOwnerPolicy, ownerPolicy, writerPolicy, readerPolicy, shareReaderPolicy, shareWriterPolicy, canComputePolicy, canCatalogPolicy)
 
-            OpenCensusUtils.traceDBIOWithParent("createResourceFull",mySpan)(_ => DBIO.from(samDAO.createResourceFull(SamResourceTypeNames.workspace, workspaceId, defaultPolicies, workspaceRequest.authorizationDomain.getOrElse(Set.empty).map(_.membersGroupName.value), userInfo)).map(_ => defaultPolicies))
+            OpenCensusUtils.traceDBIOWithParent("createResourceFull",mySpan)(_ =>
+              DBIO.from(samDAO.createResourceFull(SamResourceTypeNames.workspace, workspaceId, defaultPolicies, workspaceRequest.authorizationDomain.getOrElse(Set.empty).map(_.membersGroupName.value), userInfo)))
           }
-          _ <- OpenCensusUtils.traceDBIOWithParent("createWorkflowCollectionForWorkspace",mySpan)(mySpan2 => DBIO.from(createWorkflowCollectionForWorkspace(workspaceId, mySpan2)))
-          _ <- OpenCensusUtils.traceDBIOWithParent("traverse",mySpan)(_ => DBIO.from(Future.traverse(policies.toSeq) { case (policyName, _) =>
-            if (policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
-              // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
-              // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
-              // the limit of 2000
-              Future.successful(())
-            } else if (WorkspaceAccessLevels.withPolicyName(policyName.value).isDefined) {
-              // only sync policies that have corresponding WorkspaceAccessLevels to google because only those are
-              // granted bucket access (and thus need a google group)
-              traceWithParent(s"syncPolicy-${policyName}", mySpan)( _ => samDAO.syncPolicyToGoogle(SamResourceTypeNames.workspace, workspaceId, policyName))
-              Future.successful(())
-            } else {
-              Future.successful(())
-            }
-          }))
-        } yield workspace
+
+          // policyMap has policyName -> policyEmail
+          policyMap: Map[SamResourcePolicyName, WorkbenchEmail] = resource.accessPolicies.map( x => SamResourcePolicyName(x.id.accessPolicyName) -> WorkbenchEmail(x.email)).toMap
+
+          _ <- OpenCensusUtils.traceDBIOWithParent("createWorkflowCollectionForWorkspace",mySpan)(mySpan2 => DBIO.from(createWorkflowCollectionForWorkspace(workspaceId, policyMap, mySpan2)))
+
+          _ <- OpenCensusUtils.traceDBIOWithParent("traverse",mySpan)(_ => DBIO.from(
+            Future.traverse(policyMap) { x =>
+              val policyName = x._1
+              if (policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
+                // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
+                // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
+                // the limit of 2000
+                Future.successful(())
+              } else if (WorkspaceAccessLevels.withPolicyName(policyName.value).isDefined) {
+                // only sync policies that have corresponding WorkspaceAccessLevels to google because only those are
+                // granted bucket access (and thus need a google group)
+                traceWithParent(s"syncPolicy-${policyName}", mySpan)( _ => samDAO.syncPolicyToGoogle(SamResourceTypeNames.workspace, workspaceId, policyName))
+                Future.successful(())
+              } else {
+                Future.successful(())
+              }
+          }
+          ))
+        } yield (workspace, policyMap)
       }
     }
 
@@ -1996,23 +2006,28 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
           val workspaceId = UUID.randomUUID.toString
           val bucketName = getBucketName(workspaceId, workspaceRequest.authorizationDomain.exists(_.nonEmpty))
           s2.putAttribute("workspaceId", AttributeValue.stringAttributeValue(workspaceId))
-          OpenCensusUtils.traceDBIOWithParent("saveNewWorkspace", s2)( s3 => saveNewWorkspace(workspaceId, workspaceRequest, bucketName, dataAccess, s3).flatMap { savedWorkspace =>
+          OpenCensusUtils.traceDBIOWithParent("saveNewWorkspace", s2)( s3 => saveNewWorkspace(workspaceId, workspaceRequest, bucketName, dataAccess, s3).flatMap { case (savedWorkspace, policyMap) =>
+
             for {
               project <- OpenCensusUtils.traceDBIOWithParent("loadBillingProject", s3)( _ => dataAccess.rawlsBillingProjectQuery.load(RawlsBillingProjectName(workspaceRequest.namespace)))
               projectOwnerGroupEmail <- OpenCensusUtils.traceDBIOWithParent("getPolicySyncStatus", s3)( _ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, project.get.projectName.value, SamBillingProjectPolicyNames.owner, userInfo).map(_.email)))
-              policyEmails <- OpenCensusUtils.traceDBIOWithParent("listPoliciesForResource", s3)( _ => DBIO.from(samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceId, userInfo, true).map(_.flatMap(policy =>
-                if(policy.policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
+
+              policyEmails <- OpenCensusUtils.traceDBIOWithParent("listPoliciesForResource", s3)( _ => DBIO.successful(policyMap.map { case (policyName, policyEmail) =>
+                if (policyName == SamWorkspacePolicyNames.projectOwner && workspaceRequest.authorizationDomain.getOrElse(Set.empty).isEmpty) {
                   // when there isn't an auth domain, we will use the billing project admin policy email directly on workspace
                   // resources instead of synching an extra group. This helps to keep the number of google groups a user is in below
                   // the limit of 2000
                   Option(WorkspaceAccessLevels.ProjectOwner -> projectOwnerGroupEmail)
                 } else {
-                  WorkspaceAccessLevels.withPolicyName(policy.policyName.value).map(_ -> policy.email)
-                }).toMap)))
+                  WorkspaceAccessLevels.withPolicyName(policyName.value).map(_ -> policyEmail)
+                }
+              }.flatten.toMap ))
+
               _ <- OpenCensusUtils.traceDBIOWithParent("setupWorkspace", s3)( _ => DBIO.from(gcsDAO.setupWorkspace(userInfo, project.get, policyEmails, bucketName, getLabels(workspaceRequest.authorizationDomain.getOrElse(Set.empty).toList))))
               response <- OpenCensusUtils.traceDBIOWithParent("doOp", s3)( _ => op(SlickWorkspaceContext(savedWorkspace)))
             } yield response
-          })
+          }
+          )
       }
     })
   }

@@ -10,6 +10,8 @@ import akka.http.scaladsl.model.headers.{HttpEncodings, `Accept-Encoding`}
 import akka.http.scaladsl.unmarshalling.{Unmarshal, Unmarshaller}
 import akka.stream.Materializer
 import com.typesafe.scalalogging.LazyLogging
+import io.opencensus.scala.akka.http.TracingClient
+import io.opencensus.trace.Span
 import nl.grons.metrics.scala.{Counter, Timer}
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
 import org.broadinstitute.dsde.rawls.model.ErrorReport
@@ -28,13 +30,21 @@ trait HttpClientUtils extends LazyLogging {
     httpRequest.copy(headers = httpRequest.headers :+ header)
   }
 
-  def executeRequest(http: HttpExt, httpRequest: HttpRequest): Future[HttpResponse] = http.singleRequest(httpRequest)
+  def executeRequest(http: HttpExt, httpRequest: HttpRequest)(implicit parentSpan: Span = null): Future[HttpResponse] = {
+    if (parentSpan != null) {
+      System.out.println("KCIBUL -- got span in executeRequest!" + parentSpan.getContext.getSpanId)
+      TracingClient.traceRequest( http.singleRequest(_), parentSpan)(httpRequest)
+    } else {
+      http.singleRequest(httpRequest)
+    }
+  }
 
-  def executeRequestUnmarshalResponse[T](http: HttpExt, httpRequest: HttpRequest)(implicit unmarshaller: Unmarshaller[ResponseEntity, T]): Future[T] = {
+  def executeRequestUnmarshalResponse[T](http: HttpExt, httpRequest: HttpRequest)(implicit unmarshaller: Unmarshaller[ResponseEntity, T], parentSpan: Span = null): Future[T] = {
     executeRequest(http, httpRequest) recover { case t: Throwable =>
       throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.InternalServerError, s"http call failed: ${httpRequest.uri}: ${t.getMessage}", t))
     } flatMap { response =>
       if (response.status.isSuccess) {
+        logger.info("KCIBUL:" + response.entity.toString)
         Unmarshal(response.entity).to[T]
       } else {
         Unmarshal(response.entity).to[String] map { entityAsString =>
@@ -76,7 +86,7 @@ trait HttpClientUtils extends LazyLogging {
 case class HttpClientUtilsStandard()(implicit val materializer: Materializer, val executionContext: ExecutionContext) extends HttpClientUtils
 
 case class HttpClientUtilsGzip()(implicit val materializer: Materializer, val executionContext: ExecutionContext) extends HttpClientUtils {
-  override def executeRequest(http: HttpExt, httpRequest: HttpRequest): Future[HttpResponse] = {
+  override def executeRequest(http: HttpExt, httpRequest: HttpRequest)(implicit parentSpan: Span = null): Future[HttpResponse] = {
     http.singleRequest(addHeader(httpRequest, `Accept-Encoding`(HttpEncodings.gzip))).map { response =>
       Gzip.decodeMessage(response)
     }
@@ -84,7 +94,7 @@ case class HttpClientUtilsGzip()(implicit val materializer: Materializer, val ex
 }
 
 case class HttpClientUtilsInstrumented()(implicit val materializer: Materializer, requestCounter: (HttpRequest, HttpResponse) => Counter, requestTimer: (HttpRequest, HttpResponse) => Timer, actorRefFactory: ActorRefFactory, val executionContext: ExecutionContext) extends HttpClientUtils {
-  override def executeRequest(http: HttpExt, httpRequest: HttpRequest): Future[HttpResponse] = {
+  override def executeRequest(http: HttpExt, httpRequest: HttpRequest)(implicit parentSpan: Span = null): Future[HttpResponse] = {
     val start = System.currentTimeMillis()
     http.singleRequest(httpRequest) andThen {
       case Success(httpResponse) =>
@@ -95,7 +105,7 @@ case class HttpClientUtilsInstrumented()(implicit val materializer: Materializer
 }
 
 case class HttpClientUtilsGzipInstrumented()(implicit val materializer: Materializer, requestCounter: (HttpRequest, HttpResponse) => Counter, requestTimer: (HttpRequest, HttpResponse) => Timer, actorRefFactory: ActorRefFactory, val executionContext: ExecutionContext) extends HttpClientUtils {
-  override def executeRequest(http: HttpExt, httpRequest: HttpRequest): Future[HttpResponse] = {
+  override def executeRequest(http: HttpExt, httpRequest: HttpRequest)(implicit parentSpan: Span = null): Future[HttpResponse] = {
     val start = System.currentTimeMillis()
     http.singleRequest(addHeader(httpRequest, `Accept-Encoding`(HttpEncodings.gzip))) andThen {
       case Success(httpResponse) =>

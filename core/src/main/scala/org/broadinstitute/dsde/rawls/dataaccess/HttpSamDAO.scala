@@ -12,6 +12,8 @@ import akka.http.scaladsl.unmarshalling.{Unmarshal, Unmarshaller}
 import akka.stream.Materializer
 import com.google.api.client.auth.oauth2.Credential
 import com.typesafe.scalalogging.LazyLogging
+import io.opencensus.scala.akka.http.TracingClient
+import io.opencensus.trace.Span
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
 import org.broadinstitute.dsde.rawls.model.UserAuthJsonSupport._
 import org.broadinstitute.dsde.rawls.model.UserJsonSupport._
@@ -87,17 +89,21 @@ class HttpSamDAO(baseSamServiceURL: String, serviceAccountCreds: Credential)(imp
     }
   }
 
-  override def createResourceFull(resourceTypeName: SamResourceTypeName, resourceId: String, policies: Map[SamResourcePolicyName, SamPolicy], authDomain: Set[String], userInfo: UserInfo): Future[Unit] = {
+  override def createResourceFull(resourceTypeName: SamResourceTypeName, resourceId: String, policies: Map[SamResourcePolicyName, SamPolicy], authDomain: Set[String], userInfo: UserInfo): Future[SamCreateResourceResponse] = {
     val url = samServiceURL + s"/api/resources/v1/${resourceTypeName.value}"
 
     val httpRequest = RequestBuilding.Post(url, SamResourceWithPolicies(resourceId, policies.map(x => x._1 -> x._2), authDomain))
 
-    doSuccessOrFailureRequest(httpRequest, userInfo)
+    retry(when401or500) { () =>
+      pipeline[SamCreateResourceResponse](userInfo) apply httpRequest
+    }
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = {
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false)(implicit parentSpan: Span = null): Future[Set[SamPolicyWithNameAndEmail]] = {
     val queryString = if (noMembers) { "?noMembers" } else { "" }
     val url = samServiceURL + s"/api/resources/v1/${resourceTypeName.value}/$resourceId/policies$queryString"
+
+    println("KCIBUL - listPoliciesForResource has a span of " + parentSpan)
 
     retry(when401or500) { () =>
       pipeline[Set[SamPolicyWithNameAndEmail]](userInfo) apply RequestBuilding.Get(url)

@@ -2,6 +2,7 @@ package org.broadinstitute.dsde.rawls.mock
 
 import java.util.concurrent.ConcurrentLinkedDeque
 
+import io.opencensus.trace.Span
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.workbench.model.{WorkbenchEmail, WorkbenchGroupName}
@@ -20,7 +21,8 @@ class MockSamDAO(dataSource: SlickDataSource)(implicit executionContext: Executi
 
   override def createResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Unit] = Future.successful(())
 
-  override def createResourceFull(resourceTypeName: SamResourceTypeName, resourceId: String, policies: Map[SamResourcePolicyName, SamPolicy], authDomain: Set[String], userInfo: UserInfo): Future[Unit] = Future.successful(())
+  override def createResourceFull(resourceTypeName: SamResourceTypeName, resourceId: String, policies: Map[SamResourcePolicyName, SamPolicy], authDomain: Set[String], userInfo: UserInfo): Future[SamCreateResourceResponse] =
+    Future.successful(SamCreateResourceResponse(resourceTypeName.value, resourceId, authDomain, Set()))
 
   override def deleteResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo): Future[Unit] = Future.successful(())
 
@@ -56,7 +58,7 @@ class MockSamDAO(dataSource: SlickDataSource)(implicit executionContext: Executi
     }
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = Future.successful(
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false)(implicit span: Span = null): Future[Set[SamPolicyWithNameAndEmail]] = Future.successful(
     resourceTypeName match {
       case SamResourceTypeNames.workspace =>
         Set(SamWorkspacePolicyNames.projectOwner,
@@ -121,7 +123,7 @@ class CustomizableMockSamDAO(dataSource: SlickDataSource)(implicit executionCont
     Future.successful(invitedUsers.put(userEmail, userEmail))
   }
 
-  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false): Future[Set[SamPolicyWithNameAndEmail]] = {
+  override def listPoliciesForResource(resourceTypeName: SamResourceTypeName, resourceId: String, userInfo: UserInfo, noMembers: Boolean = false)(implicit span: Span = null): Future[Set[SamPolicyWithNameAndEmail]] = {
     policies.get((resourceTypeName, resourceId)) match {
       case Some(foundPolicies) => Future.successful(foundPolicies.values.toSet)
       case None => super.listPoliciesForResource(resourceTypeName, resourceId, userInfo)
