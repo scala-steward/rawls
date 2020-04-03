@@ -4,11 +4,10 @@ import org.broadinstitute.dsde.rawls.model.{AttributeString, ParsedMCExpressions
 
 import scala.util.{Failure, Success, Try}
 import scala.language.postfixOps
-
 import spray.json._
-
 import cats.syntax.functor._
 import cats.instances.try_._
+import org.broadinstitute.dsde.rawls.expressions.parser.{ExtendedJSONLexer, ExtendedJSONParser}
 
 // a thin abstraction layer over SlickExpressionParser
 
@@ -33,6 +32,17 @@ object ExpressionParser {
   }
 
   private def parseInputExpr(allowRootEntity: Boolean, parser: SlickExpressionParser)(expression: String): Try[Unit] = {
+
+    import org.antlr.v4.runtime.CodePointCharStream
+    import org.antlr.v4.runtime.CharStreams
+    import org.antlr.v4.runtime.CommonTokenStream
+
+
+    val inputStream: CodePointCharStream = CharStreams.fromString(expression)
+    val lexer: ExtendedJSONLexer         = new ExtendedJSONLexer(inputStream)
+    val tokenStream                      = new CommonTokenStream(lexer)
+    val parser1                          = new ExtendedJSONParser(tokenStream)
+
     // JSON expressions are valid inputs and do not need to be parsed
     Try(expression.parseJson).recoverWith { case _ => parser.parseAttributeExpr(expression, allowRootEntity) }.void
   }
