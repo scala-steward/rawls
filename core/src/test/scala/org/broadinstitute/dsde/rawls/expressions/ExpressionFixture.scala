@@ -26,7 +26,8 @@ trait ExpressionFixture {
     "this.library:cohort",
     "this.arbitrary:whatever",
     "this.case_sample.foo:ref.bar:attribute",
-    "this.underscores_are_ok"
+    "this.underscores_are_ok",
+    "this._",
   )
 
   val parseableInputExpressions = parseableInputExpressionsWithNoRoot ++ parseableInputExpressionsWithRoot
@@ -42,7 +43,8 @@ trait ExpressionFixture {
     "*",
 
     // oops, it isn't.  GAWB-2598
-    "this.hyphen-is-allowed"
+    "this.hyphen-is-allowed",
+    "this.-",
   )
 
   val unparseableInputExpressionsWithNoRoot = unparseableInputExpressions ++ parseableInputExpressionsWithRoot

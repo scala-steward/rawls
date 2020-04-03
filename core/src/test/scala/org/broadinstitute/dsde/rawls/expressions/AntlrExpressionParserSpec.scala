@@ -11,4 +11,11 @@ class AntlrExpressionParserSpec extends FlatSpec with ExpressionFixture {
 
     println(result)
   }
+
+  it should "be backwards compatible for parseableInputExpressionsWithRoot" in {
+
+    val result = parseableInputExpressionsWithRoot.map(x => (x, ExpressionParser.antlrParser(x))).map(x => (x._1, x._2.value()))
+
+    println(result)
+  }
 }
