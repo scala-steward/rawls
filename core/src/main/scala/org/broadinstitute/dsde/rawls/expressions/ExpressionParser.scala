@@ -32,7 +32,15 @@ object ExpressionParser {
   }
 
   private def parseInputExpr(allowRootEntity: Boolean, parser: SlickExpressionParser)(expression: String): Try[Unit] = {
+    // JSON expressions are valid inputs and do not need to be parsed
+    Try(expression.parseJson).recoverWith { case _ => parser.parseAttributeExpr(expression, allowRootEntity) }.void
+  }
 
+  private def parseOutputExpr(allowRootEntity: Boolean, parser: SlickExpressionParser)(expression: String): Try[Unit] = {
+    parser.parseOutputAttributeExpr(expression, allowRootEntity).void
+  }
+
+  def antlrParser(expression: String): ExtendedJSONParser = {
     import org.antlr.v4.runtime.CodePointCharStream
     import org.antlr.v4.runtime.CharStreams
     import org.antlr.v4.runtime.CommonTokenStream
@@ -41,13 +49,6 @@ object ExpressionParser {
     val inputStream: CodePointCharStream = CharStreams.fromString(expression)
     val lexer: ExtendedJSONLexer         = new ExtendedJSONLexer(inputStream)
     val tokenStream                      = new CommonTokenStream(lexer)
-    val parser1                          = new ExtendedJSONParser(tokenStream)
-
-    // JSON expressions are valid inputs and do not need to be parsed
-    Try(expression.parseJson).recoverWith { case _ => parser.parseAttributeExpr(expression, allowRootEntity) }.void
-  }
-
-  private def parseOutputExpr(allowRootEntity: Boolean, parser: SlickExpressionParser)(expression: String): Try[Unit] = {
-    parser.parseOutputAttributeExpr(expression, allowRootEntity).void
+    new ExtendedJSONParser(tokenStream)
   }
 }
