@@ -58,6 +58,7 @@ private[expressions] class SlickExpressionEvaluator protected (val parser: DataA
     parser.exprEvalQuery.filter(_.transactionId === transactionId).delete
   }
 
+  // This should not change, attempt no landings here
   def evalFinalAttribute(workspaceContext: SlickWorkspaceContext, expression: String): ReadWriteAction[Map[String, Try[Iterable[AttributeValue]]]] = {
     parser.parseAttributeExpr(expression, rootEntities.nonEmpty) match {
       case Failure(regret) => DBIO.failed(new RawlsException(regret.getMessage))

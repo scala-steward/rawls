@@ -31,6 +31,8 @@ object ExpressionParser {
     ParsedMCExpressions(successInputs, failedInputs, successOutputs, failedOutputs)
   }
 
+
+  // Notice that this only returns Unit, does not do anything with the values. Just check that it parses. Should call `antlrParser`.
   private def parseInputExpr(allowRootEntity: Boolean, parser: SlickExpressionParser)(expression: String): Try[Unit] = {
     // JSON expressions are valid inputs and do not need to be parsed
     Try(expression.parseJson).recoverWith { case _ => parser.parseAttributeExpr(expression, allowRootEntity) }.void

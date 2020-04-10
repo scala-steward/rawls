@@ -1184,7 +1184,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       dataSource.inTransaction { dataAccess =>
         withSingleEntityRec(entityType, entityName, workspaceContext, dataAccess) { entities =>
           ExpressionEvaluator.withNewExpressionEvaluator(dataAccess, Some(entities)) { evaluator =>
-            evaluator.evalFinalAttribute(workspaceContext, expression).asTry map { tryValuesByEntity => tryValuesByEntity match {
+            evaluator.evalFinalAttribute(workspaceContext, expression).asTry map { tryValuesByEntity => tryValuesByEntity match { // Actually setting up a submission
               //parsing failure
               case Failure(regret) => throw new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, regret))
               case Success(valuesByEntity) =>

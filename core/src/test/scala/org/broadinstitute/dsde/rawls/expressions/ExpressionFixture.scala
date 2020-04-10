@@ -28,6 +28,7 @@ trait ExpressionFixture {
     "this.case_sample.foo:ref.bar:attribute",
     "this.underscores_are_ok",
     "this._",
+    """["foo","bar", this.horsefish]"""
   )
 
   val parseableInputExpressions = parseableInputExpressionsWithNoRoot ++ parseableInputExpressionsWithRoot
@@ -41,6 +42,7 @@ trait ExpressionFixture {
     "where_does_this_even_go",
     "gs://buckets-arent-expressions/nope",
     "*",
+    """["foo","bar", thishorsefish]""",
 
     // oops, it isn't.  GAWB-2598
     "this.hyphen-is-allowed",

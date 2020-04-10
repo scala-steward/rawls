@@ -33,8 +33,20 @@ class ExpressionEvaluator(slickEvaluator: SlickExpressionEvaluator, val rootEnti
   def evalFinalAttribute(workspaceContext: SlickWorkspaceContext, expression: String): ReadWriteAction[Map[String, Try[Iterable[AttributeValue]]]] = {
     import slickEvaluator.parser.driver.api._
 
+    /**
+      * ParseJSONLikeThingWithAntlr match {
+      *   case (it parses) =>
+      *     go through the elements
+      *       if it is a literal value, return as we do now
+      *       if it is a lookup, call `evalFinalAttribute`
+      *   case (nope) =>
+      *     this should never happen - actually invalid expressions
+      *
+      */
+
     JsonExpressionEvaluator.evaluate(expression) match {
-      //if the expression evals as JSON, it evaluates to the same thing for every entity, so build that map here
+      // if the expression evals as JSON, it evaluates to the same thing for every entity, so build that map here
+      // never hits the database
       case Success(parsed) => DBIO.successful(rootEntities match {
         case Some(entities) => (entities map { entityRec: EntityRecord =>
           entityRec.name -> Success(parsed)
@@ -42,7 +54,8 @@ class ExpressionEvaluator(slickEvaluator: SlickExpressionEvaluator, val rootEnti
         case None => Map("" -> Success(parsed))
       })
 
-      case Failure(regret) => slickEvaluator.evalFinalAttribute(workspaceContext, expression)
+      // Not parsable as JSON
+      case Failure(_) => slickEvaluator.evalFinalAttribute(workspaceContext, expression)
     }
   }
 

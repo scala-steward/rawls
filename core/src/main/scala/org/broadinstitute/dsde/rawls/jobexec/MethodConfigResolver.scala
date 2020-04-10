@@ -104,7 +104,7 @@ class MethodConfigResolver(wdlParser: WDLParser) {
       ExpressionEvaluator.withNewExpressionEvaluator(dataAccess, entities) { evaluator =>
         //Evaluate the results per input and return a seq of DBIO[ Map(entity -> value) ], one per input
         val resultsByInput = inputs.toSeq.map { input =>
-          evaluator.evalFinalAttribute(workspaceContext, input.expression).asTry.map { tryAttribsByEntity =>
+          evaluator.evalFinalAttribute(workspaceContext, input.expression).asTry.map { tryAttribsByEntity => // Just checking whether the MC is valid and doing nothing with the values
             val validationValuesByEntity: Seq[(String, SubmissionValidationValue)] = tryAttribsByEntity match {
               case Failure(regret) =>
                 //The DBIOAction failed - this input expression was not evaluated. Make an error for each entity.

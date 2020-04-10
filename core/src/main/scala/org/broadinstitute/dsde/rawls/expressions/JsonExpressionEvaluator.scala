@@ -6,6 +6,8 @@ import spray.json._
 import scala.util.Try
 
 object JsonExpressionEvaluator {
+
+  // This thing needs to become a wrapper for the antlr parser: maps parser output (AST) into attribute values (return type stays constant)
   def evaluate(expression: String): Try[Iterable[AttributeValue]] = {
     val jsonExprT = Try(expression.parseJson)
     jsonExprT map { jsonExpr =>
