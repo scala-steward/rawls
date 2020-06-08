@@ -1,24 +1,33 @@
 package org.broadinstitute.dsde.rawls.jobexec
 
+import java.io.ByteArrayInputStream
 import java.util.UUID
 
 import akka.actor._
+import akka.http.scaladsl.model.StatusCodes
 import akka.pattern._
 import com.google.api.client.auth.oauth2.Credential
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport
+import com.google.api.client.json.jackson2.JacksonFactory
+import com.google.api.client.util.Charsets
+import com.google.api.services.bigquery.model._
+import com.google.api.services.bigquery.{Bigquery, BigqueryScopes}
+import com.google.auth.http.HttpCredentialsAdapter
+import com.google.auth.oauth2.{GoogleCredentials, ServiceAccountCredentials}
 import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.slick._
 import org.broadinstitute.dsde.rawls.jobexec.WorkflowSubmissionActor._
 import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.WorkflowFailureModes.WorkflowFailureMode
+import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.WorkflowStatus
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.util.{FutureSupport, MethodWiths, addJitter}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
-import akka.http.scaladsl.model.StatusCodes
-import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.WorkflowStatus
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 
+import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
@@ -201,19 +210,20 @@ trait WorkflowSubmission extends FutureSupport with LazyLogging with MethodWiths
     }
 
     ExecutionServiceWorkflowOptions(
-      s"gs://${workspace.bucketName}/${submissionId}",
-      workspace.namespace,
-      userEmail.value,
-      petSAEmail,
-      petSAJson,
-      billingProject.cromwellAuthBucketUrl,
-      s"gs://${workspace.bucketName}/${submissionId}/workflow.logs",
-      runtimeOptions,
-      useCallCache,
-      deleteIntermediateOutputFiles,
-      billingProject.cromwellBackend.getOrElse(defaultBackend),
-      workflowFailureMode,
-      google_labels = Map("terra-submission-id" -> s"terra-${submissionId.toString}")
+      jes_gcs_root = s"gs://${workspace.bucketName}/${submissionId}",
+      google_project = workspace.namespace,
+      account_name = userEmail.value,
+      google_compute_service_account = petSAEmail,
+      user_service_account_json = petSAJson,
+      auth_bucket = billingProject.cromwellAuthBucketUrl,
+      final_workflow_log_dir = s"gs://${workspace.bucketName}/${submissionId}/workflow.logs",
+      default_runtime_attributes = runtimeOptions,
+      read_from_cache = useCallCache,
+      delete_intermediate_output_files = deleteIntermediateOutputFiles,
+      backend = billingProject.cromwellBackend.getOrElse(defaultBackend),
+      workflow_failure_mode = workflowFailureMode,
+      google_labels = Map("terra-submission-id" -> s"terra-${submissionId.toString}"),
+      monitoring_image = Option("us-docker.pkg.dev/broad-dsde-cromwell-dev/wa-196-mvp-anyone-pull-kshakir/monitoring-image"),
     )
   }
 
@@ -329,6 +339,73 @@ trait WorkflowSubmission extends FutureSupport with LazyLogging with MethodWiths
         deleteIntermediateOutputFiles = submissionRec.deleteIntermediateOutputFiles,
         workflowFailureMode = WorkflowFailureModes.withNameOpt(submissionRec.workflowFailureMode)
       )
+
+      logger.info("FINDME: begin creating bq dataset")
+
+      val projectId = wfOpts.google_project
+      val datasetId = "wa_196_mvp"
+      val tableId = "runtime_metrics"
+
+      logger.info(s"FINDME: projectId = $projectId")
+
+      val transport = GoogleNetHttpTransport.newTrustedTransport()
+      val jsonFactory = JacksonFactory.getDefaultInstance
+      val credentials = GoogleCredentials
+        .fromStream(new ByteArrayInputStream(petSAJson.getBytes(Charsets.UTF_8)))
+        .createScoped(BigqueryScopes.BIGQUERY)
+      credentials match {
+        case credentials: ServiceAccountCredentials =>
+          logger.info(
+            s"""|FINDME: Credentials
+                |FINDME:   project = ${credentials.getProjectId}
+                |FINDME:   email   = ${credentials.getClientEmail}
+                |FINDME:   id      = ${credentials.getClientId}
+                |FINDME:   scopes  = ${credentials.getScopes.asScala.mkString("'", "', '", "'")}
+                |""".stripMargin)
+        case _ => logger.info(s"FINDME: Credentials is a ${credentials.getClass}")
+      }
+      val httpRequestInitializer = new HttpCredentialsAdapter(credentials)
+      val bigquery: Bigquery = new Bigquery.Builder(transport, jsonFactory, httpRequestInitializer)
+        .setApplicationName("rawls")
+        .build()
+
+      val datasetReference = new DatasetReference().setProjectId(projectId).setDatasetId(datasetId)
+      val dataset = new Dataset().setDatasetReference(datasetReference)
+      try {
+        bigquery.datasets.insert(projectId, dataset).execute
+      } catch {
+        case exception: Exception =>
+          logger.warn(s"Received an error while trying to create the dataset ${projectId}/${datasetId}: ${exception.getMessage}", exception)
+      }
+
+      val tableReference = new TableReference().setProjectId(projectId).setDatasetId(datasetId).setTableId(tableId)
+      val tableFields = List(
+        new TableFieldSchema().setName("datetime").setType("TIMESTAMP").setMode("REQUIRED"),
+        new TableFieldSchema().setName("google_project").setType("STRING").setMode("REQUIRED"),
+        new TableFieldSchema().setName("workflow_id").setType("STRING").setMode("REQUIRED"),
+        new TableFieldSchema().setName("call_name").setType("STRING").setMode("REQUIRED"),
+        new TableFieldSchema().setName("call_attempt").setType("INTEGER").setMode("REQUIRED"),
+        new TableFieldSchema().setName("call_index").setType("INTEGER").setMode("NULLABLE"),
+        new TableFieldSchema().setName("cpu_load").setType("NUMERIC").setMode("NULLABLE"),
+        new TableFieldSchema().setName("cpu_count").setType("INTEGER").setMode("NULLABLE"),
+        new TableFieldSchema().setName("mem_used").setType("INTEGER").setMode("NULLABLE"),
+        new TableFieldSchema().setName("mem_total").setType("INTEGER").setMode("NULLABLE"),
+        new TableFieldSchema().setName("disk_used").setType("INTEGER").setMode("NULLABLE"),
+        new TableFieldSchema().setName("disk_total").setType("INTEGER").setMode("NULLABLE"),
+      )
+      val table = new  com.google.api.services.bigquery.model.Table()
+        .setTableReference(tableReference)
+        .setSchema(new TableSchema().setFields(tableFields.asJava))
+        .setTimePartitioning(new TimePartitioning().setField("datetime").setRequirePartitionFilter(true))
+      try {
+        bigquery.tables().insert(projectId, datasetId, table).execute()
+      } catch {
+        case exception: Exception =>
+          logger.warn(s"Received an error while trying to create the dataset ${billingProject}/${datasetId}: ${exception.getMessage}", exception)
+      }
+
+      logger.info("FINDME: done trying creating bq dataset")
+
         val submissionAndWorkspaceLabels = Map("submission-id" -> submissionRec.id.toString,  "workspace-id" -> workspaceRec.id.toString)
         val wfLabels = workspaceRec.workflowCollection match {
           case Some(workflowCollection) if useWorkflowCollectionLabel => submissionAndWorkspaceLabels + ("caas-collection-name" -> workflowCollection)
