@@ -9,7 +9,7 @@ import akka.testkit.TestKit
 import bio.terra.datarepo.model.{ColumnModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription
 import com.typesafe.config.ConfigFactory
-import org.broadinstitute.dsde.rawls.config.{DeploymentManagerConfig, MethodRepoConfig}
+import org.broadinstitute.dsde.rawls.config.{DataRepoEntityProviderConfig, DeploymentManagerConfig, MethodRepoConfig}
 import org.broadinstitute.dsde.rawls.coordination.UncoordinatedDataSourceAccess
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
@@ -334,7 +334,7 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
       val requesterPaysSetupService = new RequesterPaysSetupService(slickDataSource, gcsDAO, bondApiDAO, requesterPaysRole = "requesterPaysRole")
 
       val bigQueryServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory()
-      val entityManager = EntityManager.defaultEntityManager(dataSource, workspaceManagerDAO, dataRepoDAO, samDAO, bigQueryServiceFactory)
+      val entityManager = EntityManager.defaultEntityManager(dataSource, workspaceManagerDAO, dataRepoDAO, samDAO, bigQueryServiceFactory, DataRepoEntityProviderConfig(100, 10))
 
       val workspaceServiceConstructor = WorkspaceService.constructor(
         dataSource,

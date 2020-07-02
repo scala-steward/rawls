@@ -6,6 +6,7 @@ import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import bio.terra.datarepo.model.{ColumnModel, SnapshotModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription
 import bio.terra.workspace.model.DataReferenceDescription.{CloningInstructionsEnum, ReferenceTypeEnum}
+import org.broadinstitute.dsde.rawls.config.DataRepoEntityProviderConfig
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, MockBigQueryServiceFactory, SamDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
@@ -41,15 +42,16 @@ trait DataRepoEntityProviderSpecSupport {
                          bqFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(),
                          entityRequestArguments: EntityRequestArguments = EntityRequestArguments(workspace, userInfo, Some(DataReferenceName("referenceName")))
                         ): DataRepoEntityProvider = {
-    new DataRepoEntityProvider(snapshotModel, entityRequestArguments, samDAO, bqFactory)
+    new DataRepoEntityProvider(snapshotModel, entityRequestArguments, samDAO, bqFactory, DataRepoEntityProviderConfig(100, 10))
   }
 
   def createTestBuilder(workspaceManagerDAO: WorkspaceManagerDAO = new SpecWorkspaceManagerDAO(Right(createDataRefDescription())),
                         dataRepoDAO: SpecDataRepoDAO = new SpecDataRepoDAO(Right(createSnapshotModel())),
                         samDAO: SamDAO = new MockSamDAO(slickDataSource),
-                        bqServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory()
+                        bqServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(),
+                        config: DataRepoEntityProviderConfig = DataRepoEntityProviderConfig(100, 10)
                        ): DataRepoEntityProviderBuilder = {
-    new DataRepoEntityProviderBuilder(workspaceManagerDAO, dataRepoDAO, samDAO, bqServiceFactory)
+    new DataRepoEntityProviderBuilder(workspaceManagerDAO, dataRepoDAO, samDAO, bqServiceFactory, config)
   }
 
 

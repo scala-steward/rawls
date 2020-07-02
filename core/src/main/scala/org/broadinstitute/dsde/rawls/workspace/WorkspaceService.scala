@@ -19,8 +19,11 @@ import org.broadinstitute.dsde.rawls.dataaccess.slick._
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext}
 import org.broadinstitute.dsde.rawls.entities.{EntityManager, EntityRequestArguments}
+import org.broadinstitute.dsde.rawls.expressions.ExpressionEvaluator
+import org.broadinstitute.dsde.rawls.expressions.Transformers.LookupExpression
 import org.broadinstitute.dsde.rawls.genomics.GenomicsService
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver
+import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.AttributeUpdateOperations._
 import org.broadinstitute.dsde.rawls.model.ExecutionJsonSupport.{ActiveSubmissionFormat, SubmissionListResponseFormat, SubmissionReportFormat, SubmissionStatusResponseFormat, SubmissionValidationReportFormat, WorkflowCostFormat, WorkflowOutputsFormat, WorkflowQueueStatusByUserResponseFormat, WorkflowQueueStatusResponseFormat}
@@ -1327,9 +1330,27 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       methodConfigInputs = gatherInputsResult.processableInputs.map { methodInput => SubmissionValidationInput(methodInput.workflowInput.getName, methodInput.expression) }
       header = SubmissionValidationHeader(methodConfig.rootEntityType, methodConfigInputs)
 
-      submissionParameters <- entityProvider.evaluateExpressions(ExpressionEvaluationContext(submissionRequest.entityType, submissionRequest.entityName, submissionRequest.expression, methodConfig.rootEntityType), gatherInputsResult)
+      workspaceExpressionResults <- evaluateWorkspaceExpressions(workspaceContext, gatherInputsResult)
+      submissionParameters <- entityProvider.evaluateExpressions(ExpressionEvaluationContext(submissionRequest.entityType, submissionRequest.entityName, submissionRequest.expression, methodConfig.rootEntityType), gatherInputsResult, workspaceExpressionResults)
     } yield {
       (workspaceContext, submissionParameters, workflowFailureMode, header)
+    }
+  }
+
+  private def evaluateWorkspaceExpressions(workspace: Workspace, gatherInputResults: GatherInputsResult): Future[Map[LookupExpression, Try[Iterable[AttributeValue]]]] = {
+    dataSource.inTransaction { dataAccess =>
+      ExpressionEvaluator.withNewExpressionEvaluator(dataAccess, None) { expressionEvaluator =>
+        val expressionQueries = gatherInputResults.processableInputs.map { input =>
+          expressionEvaluator.evalWorkspaceExpressionsOnly(workspace, input.expression)
+        }
+
+        // reduce(_ ++ _) collapses the series of maps into a single map
+        // duplicate map keys are dropped but that is ok as the values should be duplicate
+        DBIO.sequence(expressionQueries.toSeq).map {
+          case Seq() => Map.empty[LookupExpression, Try[Iterable[AttributeValue]]]
+          case results => results.reduce(_ ++ _)
+        }
+      }
     }
   }
 
