@@ -9,8 +9,9 @@ import org.broadinstitute.dsde.rawls.model.{AttributeValue, Workspace}
 import scala.concurrent.ExecutionContext
 import scala.util.Try
 
-class LocalEvaluateToAttributeVisitor(workspace: Workspace, slickEvaluator: SlickExpressionEvaluator)
-                                     (implicit executionContext: ExecutionContext)
+// todo: rename?
+class LocalEvaluateToAttributeVisitor(val workspace: Workspace, val slickEvaluator: SlickExpressionEvaluator)
+                                     (implicit val executionContext: ExecutionContext)
   extends TerraExpressionBaseVisitor[ReadWriteAction[Seq[ExpressionAndResult]]] {
 
   override def defaultResult(): ReadWriteAction[Seq[ExpressionAndResult]] = {
@@ -27,23 +28,7 @@ class LocalEvaluateToAttributeVisitor(workspace: Workspace, slickEvaluator: Slic
     DBIO.sequence(Seq(aggregate, nextResult)).map(_.flatten)
   }
 
-  override def visitEntityLookup(ctx: EntityLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
-    slickEvaluator.evalEntityLookupFinalAttribute(workspace, ctx).map { result =>
-      Seq((ctx.getText, result))
-    }
-  }
 
-  override def visitWorkspaceEntityLookup(ctx: WorkspaceEntityLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
-    slickEvaluator.evalWorkspaceEntityLookupFinalAttribute(workspace, ctx).map { result =>
-      Seq((ctx.getText, result))
-    }
-  }
-
-  override def visitWorkspaceAttributeLookup(ctx: WorkspaceAttributeLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
-    slickEvaluator.evalWorkspaceAttributeLookupFinalAttribute(workspace, ctx).map { result =>
-      Seq((ctx.getText, result))
-    }
-  }
 }
 
 object LocalEvaluateToAttributeVisitor {
@@ -51,4 +36,34 @@ object LocalEvaluateToAttributeVisitor {
   type LookupExpression = String
 
   type ExpressionAndResult = (LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])
+}
+
+trait WorkspaceLookups {
+  val slickEvaluator: SlickExpressionEvaluator
+  val workspace: Workspace
+  implicit val executionContext: ExecutionContext
+
+  def visitWorkspaceEntityLookup(ctx: WorkspaceEntityLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
+    slickEvaluator.evalWorkspaceEntityLookupFinalAttribute(workspace, ctx).map { result =>
+      Seq((ctx.getText, result))
+    }
+  }
+
+  def visitWorkspaceAttributeLookup(ctx: WorkspaceAttributeLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
+    slickEvaluator.evalWorkspaceAttributeLookupFinalAttribute(workspace, ctx).map { result =>
+      Seq((ctx.getText, result))
+    }
+  }
+}
+
+trait LocalEntityLookups {
+  val slickEvaluator: SlickExpressionEvaluator
+  val workspace: Workspace
+  implicit val executionContext: ExecutionContext
+
+  def visitEntityLookup(ctx: EntityLookupContext): ReadWriteAction[Seq[ExpressionAndResult]] = {
+    slickEvaluator.evalEntityLookupFinalAttribute(workspace, ctx).map { result =>
+      Seq((ctx.getText, result))
+    }
+  }
 }
