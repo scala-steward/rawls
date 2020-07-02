@@ -18,7 +18,7 @@ import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, E
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
-import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeValue, AttributeValueList, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import spray.json._
 
@@ -154,20 +154,20 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
   }
 
-  def pkFromSnapshotTable(tableModel: TableModel): String = {
+  def pkFromSnapshotTable(tableModel: TableModel, tableAlias: Option[String] = None): String = {
     // If data repo returns one and only one primary key, use it.
     // If data repo returns null or a compound PK, use the built-in rowid for pk instead.
-    scala.Option(tableModel.getPrimaryKey) match {
+    val pkColumn = scala.Option(tableModel.getPrimaryKey) match {
       case Some(pk) if pk.size() == 1 => pk.asScala.head
       case _ => datarepoRowIdColumn // default data repo value
     }
+    tableAlias.map(alias => s"$alias.$pkColumn").getOrElse(pkColumn)
   }
 
   override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] = {
     expressionEvaluationContext match {
       case ExpressionEvaluationContext(None, None, None, Some(rootEntityType)) =>
         val baseTableAlias = "root"
-        val qualifiedRowIdColumn = s"$baseTableAlias.$datarepoRowIdColumn"
 
         val parsedExpressions = gatherInputsResult.processableInputs.flatMap { input =>
           val parser = AntlrTerraExpressionParser.getParser(input.expression)
@@ -176,10 +176,12 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
           visitor.visit(parser.root())
         }
 
+        val tableModel = getTableModel(rootEntityType)
+        val pkColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
+
         val bqQueryJobConfigs = parsedExpressions.groupBy(_.relationships).map {
           case (Nil, expressions) =>
             val columnNames = expressions.map(_.columnName)
-            val tableModel = getTableModel(rootEntityType)
             val validColumnNames = tableModel.getColumns.asScala.map(_.getName.toLowerCase).toSet
 
             val invalidColumnNames = columnNames -- validColumnNames
@@ -192,7 +194,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
             // determine view name
             val viewName = snapshotModel.getName
             // generate BQ SQL for this entity
-            val query = s"SELECT $qualifiedRowIdColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}` $baseTableAlias"
+            val query = s"SELECT $pkColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}` $baseTableAlias"
 
             (expressions, QueryJobConfiguration.newBuilder(query).build)
 
@@ -215,8 +217,14 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
               parsedExpression <- parsedExpressions
             } yield {
               val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
-              val dataRepoRowId = resultRow.get(qualifiedRowIdColumn).getStringValue
-              (dataRepoRowId, parsedExpression.expression, fieldToAttribute(field, resultRow))
+              val primaryKey = resultRow.get(pkColumn).getStringValue
+              val attribute = fieldToAttribute(field, resultRow)
+              val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
+                case v: AttributeValue => Success(Seq(v))
+                case AttributeValueList(l) => Success(l)
+                case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
+              }
+              (primaryKey, parsedExpression.expression, evaluationResult)
             }
           }
           expressionResults.use(IO.pure).unsafeToFuture()
