@@ -2,20 +2,24 @@ package org.broadinstitute.dsde.rawls.entities.datarepo
 
 import java.util.UUID
 
-import bio.terra.datarepo.model.TableModel
+import akka.http.scaladsl.model.StatusCodes
+import bio.terra.datarepo.model.{SnapshotModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription.ReferenceTypeEnum
 import cats.effect.{IO, Resource}
+import cats.implicits._
 import com.google.cloud.bigquery.{QueryJobConfiguration, QueryParameterValue, TableResult}
 import com.typesafe.scalalogging.LazyLogging
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, SamDAO}
 import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityTypeNotFoundException, UnsupportedEntityOperationException}
+import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
-import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, DataReferenceName, Entity, EntityTypeMetadata, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
 import spray.json._
 
 import scala.collection.JavaConverters._
@@ -30,16 +34,28 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   val workspace = requestArguments.workspace
   val userInfo = requestArguments.userInfo
   val dataReferenceName = requestArguments.dataReference.getOrElse(throw new DataEntityException("data reference must be defined for this provider"))
+  val datarepoRowIdColumn = "datarepo_row_id"
+
+  private lazy val snapshotModel = {
+    // get snapshot UUID from data reference name
+    val snapshotId = lookupSnapshotForName(dataReferenceName)
+
+    // contact TDR to describe the snapshot
+    dataRepoDAO.getSnapshot(snapshotId, userInfo.accessToken)
+  }
+
+  private lazy val googleProject = {
+    // determine project to be billed for the BQ job TODO: need business logic from PO!
+    requestArguments.billingProject match {
+      case Some(billing) => billing.projectName.value
+      case None => workspace.namespace
+    }
+  }
+
 
   override def entityTypeMetadata(): Future[Map[String, EntityTypeMetadata]] = {
 
     // TODO: AS-321 auto-switch to see if the ref supplied in argument is a UUID or a name?? Use separate query params? Never allow ID?
-
-    // get snapshotId from reference name
-    val snapshotId = lookupSnapshotForName(dataReferenceName)
-
-    // contact TDR to describe the snapshot
-    val snapshotModel = dataRepoDAO.getSnapshot(snapshotId, userInfo.accessToken)
 
     // reformat TDR's response into the expected response structure
     val entityTypesResponse: Map[String, EntityTypeMetadata] = snapshotModel.getTables.asScala.map { table =>
@@ -60,23 +76,8 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
 
   override def getEntity(entityType: String, entityName: String): Future[Entity] = {
-    // get snapshot UUID from data reference name
-    val snapshotId = lookupSnapshotForName(dataReferenceName)
-
-    // contact TDR to describe the snapshot
-    val snapshotModel = dataRepoDAO.getSnapshot(snapshotId, userInfo.accessToken)
-
     // extract table definition, with PK, from snapshot schema
-    val tableModel = snapshotModel.getTables.asScala.find(_.getName == entityType) match {
-      case Some(table) => table
-      case None => throw new EntityTypeNotFoundException(entityType)
-    }
-
-    // determine project to be billed for the BQ job TODO: need business logic from PO!
-    val googleProject: String = requestArguments.billingProject match {
-      case Some(billing) => billing.projectName.value
-      case None => workspace.namespace
-    }
+    val tableModel = getTableModel(entityType)
 
     //  determine pk column
     val pk = pkFromSnapshotTable(tableModel)
@@ -105,6 +106,13 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
         IO.pure(queryResultsToEntity(queryResults, entityType, pk))
       }.unsafeRunSync()
 
+    }
+  }
+
+  private def getTableModel(entityType: String) = {
+    snapshotModel.getTables.asScala.find(_.getName == entityType) match {
+      case Some(table) => table
+      case None => throw new EntityTypeNotFoundException(entityType)
     }
   }
 
@@ -151,12 +159,70 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     // If data repo returns null or a compound PK, use the built-in rowid for pk instead.
     scala.Option(tableModel.getPrimaryKey) match {
       case Some(pk) if pk.size() == 1 => pk.asScala.head
-      case _ => "datarepo_row_id" // default data repo value
+      case _ => datarepoRowIdColumn // default data repo value
     }
   }
 
-  override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] =
+  override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] = {
+    expressionEvaluationContext match {
+      case ExpressionEvaluationContext(None, None, None, Some(rootEntityType)) =>
+        val parsedExpressions = gatherInputsResult.processableInputs.flatMap { input =>
+          val parser = AntlrTerraExpressionParser.getParser(input.expression)
+          val visitor = new DataRepoEvaluateToAttributeVisitor()
+
+          visitor.visit(parser.root())
+        }
+
+        val bqQueryJobConfigs = parsedExpressions.groupBy(_.relations).map {
+          case (Nil, expressions) =>
+            val columnNames = expressions.map(_.attributeName) + datarepoRowIdColumn
+            val tableModel = getTableModel(rootEntityType)
+            val validColumnNames = tableModel.getColumns.asScala.map(_.getName.toLowerCase).toSet
+
+            val invalidColumnNames = columnNames -- validColumnNames
+            if (invalidColumnNames.nonEmpty) {
+              // we should have validated all this already, this is just be sure we don't get any sql injection
+              throw new RawlsException(s"invalid columns: ${invalidColumnNames.mkString(",")}")
+            }
+
+            val dataProject = snapshotModel.getDataProject
+            // determine view name
+            val viewName = snapshotModel.getName
+            // generate BQ SQL for this entity
+            val query = s"SELECT ${columnNames.mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}`"
+
+            (expressions, QueryJobConfiguration.newBuilder(query).build)
+
+          case _ => throw new RawlsException("relations not implemented yet")
+        }
+
+        // get pet service account key for this user
+        samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail) map { petKey =>
+
+          // get a BQ service (i.e. dao) instance, and use it to execute the query against BQ
+          val queryResource = for {
+            bqService <- bqServiceFactory.getServiceForPet(petKey)
+            queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse {
+              case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
+            })
+          } yield {
+            for {
+              (parsedExpressions, tableResult) <- queryResults
+              resultRow <- tableResult.iterateAll().asScala
+              parsedExpression <- parsedExpressions
+            } yield {
+              val field = tableResult.getSchema.getFields.get(parsedExpression.attributeName)
+              val dataRepoRowId = resultRow.get(datarepoRowIdColumn).getStringValue
+              (dataRepoRowId, parsedExpression.expression, fieldToAttribute(field, resultRow)._2)
+            }
+          }
+        }
+
+
+      case _ => throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows"))
+    }
     throw new UnsupportedEntityOperationException("evaluateExpressions not supported by this provider.")
+  }
 
   override def expressionValidator: ExpressionValidator =
     throw new UnsupportedEntityOperationException("expressionEvaluator not supported by this provider.")
