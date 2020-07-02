@@ -4,9 +4,11 @@ import org.broadinstitute.dsde.rawls.expressions.parser.antlr.TerraExpressionPar
 
 import scala.collection.JavaConverters._
 
-case class ParsedDataRepoExpression(relations: List[String], attributeName: String, expression: String)
+case class ParsedDataRepoExpression(relationships: List[String], columnName: String, expression: String, tableAlias: String) {
+  val qualifiedColumnName = s"$tableAlias.$columnName"
+}
 
-class DataRepoEvaluateToAttributeVisitor() extends TerraExpressionBaseVisitor[Seq[ParsedDataRepoExpression]] {
+class DataRepoEvaluateToAttributeVisitor(rootTableAlias: String) extends TerraExpressionBaseVisitor[Seq[ParsedDataRepoExpression]] {
   override def defaultResult(): Seq[ParsedDataRepoExpression] = Seq.empty
 
   override def aggregateResult(aggregate: Seq[ParsedDataRepoExpression], nextResult: Seq[ParsedDataRepoExpression]): Seq[ParsedDataRepoExpression] = {
@@ -14,10 +16,19 @@ class DataRepoEvaluateToAttributeVisitor() extends TerraExpressionBaseVisitor[Se
   }
 
   override def visitEntityLookup(ctx: EntityLookupContext): Seq[ParsedDataRepoExpression] = {
+    val relations = ctx.relation().asScala.toList
+
+    val tableAlias = if (relations.isEmpty) {
+      rootTableAlias
+    } else {
+      relations.last.getText
+    }
+
     Seq(ParsedDataRepoExpression(
-      ctx.relation().asScala.toList.map(_.attributeName().getText),
+      relations.map(_.attributeName().getText),
       ctx.attributeName().getText.toLowerCase,
-      ctx.getText
+      ctx.getText,
+      tableAlias
     ))
   }
 }

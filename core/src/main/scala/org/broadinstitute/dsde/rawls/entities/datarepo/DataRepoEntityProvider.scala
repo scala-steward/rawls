@@ -3,13 +3,12 @@ package org.broadinstitute.dsde.rawls.entities.datarepo
 import java.util.UUID
 
 import akka.http.scaladsl.model.StatusCodes
-import bio.terra.datarepo.model.{SnapshotModel, TableModel}
+import bio.terra.datarepo.model.TableModel
 import bio.terra.workspace.model.DataReferenceDescription.ReferenceTypeEnum
 import cats.effect.{IO, Resource}
 import cats.implicits._
 import com.google.cloud.bigquery.{QueryJobConfiguration, QueryParameterValue, TableResult}
 import com.typesafe.scalalogging.LazyLogging
-import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, SamDAO}
@@ -20,6 +19,7 @@ import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpress
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
 import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import spray.json._
 
 import scala.collection.JavaConverters._
@@ -166,16 +166,19 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] = {
     expressionEvaluationContext match {
       case ExpressionEvaluationContext(None, None, None, Some(rootEntityType)) =>
+        val baseTableAlias = "root"
+        val qualifiedRowIdColumn = s"$baseTableAlias.$datarepoRowIdColumn"
+
         val parsedExpressions = gatherInputsResult.processableInputs.flatMap { input =>
           val parser = AntlrTerraExpressionParser.getParser(input.expression)
-          val visitor = new DataRepoEvaluateToAttributeVisitor()
+          val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
 
           visitor.visit(parser.root())
         }
 
-        val bqQueryJobConfigs = parsedExpressions.groupBy(_.relations).map {
+        val bqQueryJobConfigs = parsedExpressions.groupBy(_.relationships).map {
           case (Nil, expressions) =>
-            val columnNames = expressions.map(_.attributeName) + datarepoRowIdColumn
+            val columnNames = expressions.map(_.columnName)
             val tableModel = getTableModel(rootEntityType)
             val validColumnNames = tableModel.getColumns.asScala.map(_.getName.toLowerCase).toSet
 
@@ -189,7 +192,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
             // determine view name
             val viewName = snapshotModel.getName
             // generate BQ SQL for this entity
-            val query = s"SELECT ${columnNames.mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}`"
+            val query = s"SELECT $qualifiedRowIdColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}` $baseTableAlias"
 
             (expressions, QueryJobConfiguration.newBuilder(query).build)
 
@@ -197,12 +200,12 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
         }
 
         // get pet service account key for this user
-        samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail) map { petKey =>
+        samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail) flatMap { petKey =>
 
           // get a BQ service (i.e. dao) instance, and use it to execute the query against BQ
-          val queryResource = for {
+          val expressionResults = for {
             bqService <- bqServiceFactory.getServiceForPet(petKey)
-            queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse {
+            queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
               case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
             })
           } yield {
@@ -211,17 +214,17 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
               resultRow <- tableResult.iterateAll().asScala
               parsedExpression <- parsedExpressions
             } yield {
-              val field = tableResult.getSchema.getFields.get(parsedExpression.attributeName)
-              val dataRepoRowId = resultRow.get(datarepoRowIdColumn).getStringValue
-              (dataRepoRowId, parsedExpression.expression, fieldToAttribute(field, resultRow)._2)
+              val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
+              val dataRepoRowId = resultRow.get(qualifiedRowIdColumn).getStringValue
+              (dataRepoRowId, parsedExpression.expression, fieldToAttribute(field, resultRow))
             }
           }
+          expressionResults.use(IO.pure).unsafeToFuture()
         }
 
 
       case _ => throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows"))
     }
-    throw new UnsupportedEntityOperationException("evaluateExpressions not supported by this provider.")
   }
 
   override def expressionValidator: ExpressionValidator =
