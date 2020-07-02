@@ -15,6 +15,7 @@ import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, S
 import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityTypeNotFoundException, UnsupportedEntityOperationException}
+import org.broadinstitute.dsde.rawls.expressions.Transformers
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
@@ -35,6 +36,14 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   val userInfo = requestArguments.userInfo
   val dataReferenceName = requestArguments.dataReference.getOrElse(throw new DataEntityException("data reference must be defined for this provider"))
   val datarepoRowIdColumn = "datarepo_row_id"
+
+  /**
+  These type aliases are to help differentiate between the Entity Name and the Lookup expressions in return types
+     in below functions. Since both of them are String, it becomes difficult to understand what is being referenced where.
+    */
+  private type EntityName = String
+  private type LookupExpression = String // attribute reference expression
+  // todo ^ these are defined 3 times now in the codebase
 
   private lazy val snapshotModel = {
     // get snapshot UUID from data reference name
@@ -224,12 +233,14 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
                 case AttributeValueList(l) => Success(l)
                 case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
               }
-              (primaryKey, parsedExpression.expression, evaluationResult)
+              (parsedExpression.expression.asInstanceOf[LookupExpression], List(primaryKey.asInstanceOf[EntityName] -> evaluationResult).toMap)
             }
           }
-          expressionResults.use(IO.pure).unsafeToFuture()
+          expressionResults.use(IO.pure).unsafeToFuture().map {results =>
+            val transformers = new Transformers(rootEntities)
+            transformers.transformAndParseExpr(results, parsedTree)
+          }
         }
-
 
       case _ => throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows"))
     }
