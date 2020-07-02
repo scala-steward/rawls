@@ -233,10 +233,20 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
                 case AttributeValueList(l) => Success(l)
                 case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
               }
-              (parsedExpression.expression.asInstanceOf[LookupExpression], List(primaryKey.asInstanceOf[EntityName] -> evaluationResult).toMap)
+              (parsedExpression.expression.asInstanceOf[LookupExpression], Map(primaryKey.asInstanceOf[EntityName] -> evaluationResult))
             }
           }
           expressionResults.use(IO.pure).unsafeToFuture().map {results =>
+            // todo: start here.. do we need to `groupBy` the results here? the types get funky and the types are matching right now
+            // funkiness:
+    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123")))
+    //            val res10: List[(String, scala.collection.immutable.Map[String,String])] = List((asdf,Map(asdfdsfdf -> f123)))
+    //
+    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123"))).groupBy(_._1)
+    //            val res11: scala.collection.immutable.Map[String,List[(String, scala.collection.immutable.Map[String,String])]] = HashMap(asdf -> List((asdf,Map(asdfdsfdf -> f123))))
+    //
+    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123")), ("asdf", Map("222asdfdsfdf" -> "222f123"))).groupBy(_._1)
+    //            val res12: scala.collection.immutable.Map[String,List[(String, scala.collection.immutable.Map[String,String])]] = HashMap(asdf -> List((asdf,Map(asdfdsfdf -> f123)), (asdf,Map(222asdfdsfdf -> 222f123))))
             val transformers = new Transformers(rootEntities)
             transformers.transformAndParseExpr(results, parsedTree)
           }
