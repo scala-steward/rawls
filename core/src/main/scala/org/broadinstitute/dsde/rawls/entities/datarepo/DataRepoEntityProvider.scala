@@ -19,9 +19,13 @@ import org.broadinstitute.dsde.rawls.expressions.Transformers
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
-import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeValue, AttributeValueList, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeNull, AttributeValue, AttributeValueEmptyList, AttributeValueList, AttributeValueRawJson, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, SubmissionValidationValue, TerraDataRepoSnapshotRequest}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import spray.json._
+import Transformers._
+import cromwell.client.model.ToolInputParameter
+import cromwell.client.model.ValueType.TypeNameEnum
+import org.broadinstitute.dsde.rawls.util.CollectionUtils
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,13 +41,6 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   val dataReferenceName = requestArguments.dataReference.getOrElse(throw new DataEntityException("data reference must be defined for this provider"))
   val datarepoRowIdColumn = "datarepo_row_id"
 
-  /**
-  These type aliases are to help differentiate between the Entity Name and the Lookup expressions in return types
-     in below functions. Since both of them are String, it becomes difficult to understand what is being referenced where.
-    */
-  private type EntityName = String
-  private type LookupExpression = String // attribute reference expression
-  // todo ^ these are defined 3 times now in the codebase
 
   private lazy val snapshotModel = {
     // get snapshot UUID from data reference name
@@ -181,11 +178,11 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
         val parsedExpressions = gatherInputsResult.processableInputs.flatMap { input =>
           val parser = AntlrTerraExpressionParser.getParser(input.expression)
           val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
-
           visitor.visit(parser.root())
         }
 
         val tableModel = getTableModel(rootEntityType)
+        if (tableModel.getRowCount * parsedExpressions.size > 1000000) throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. Choose a table with fewer rows or a workflow configuration with fewer inputs.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
         val pkColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
 
         val bqQueryJobConfigs = parsedExpressions.groupBy(_.relationships).map {
@@ -195,7 +192,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
             val invalidColumnNames = columnNames -- validColumnNames
             if (invalidColumnNames.nonEmpty) {
-              // we should have validated all this already, this is just be sure we don't get any sql injection
+              // we should have validated all this already, this is just to be sure we don't get any sql injection
               throw new RawlsException(s"invalid columns: ${invalidColumnNames.mkString(",")}")
             }
 
@@ -226,30 +223,53 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
               parsedExpression <- parsedExpressions
             } yield {
               val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
-              val primaryKey = resultRow.get(pkColumn).getStringValue
+              val primaryKey: EntityName = resultRow.get(pkColumn).getStringValue
               val attribute = fieldToAttribute(field, resultRow)
               val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
                 case v: AttributeValue => Success(Seq(v))
                 case AttributeValueList(l) => Success(l)
                 case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
               }
-              (parsedExpression.expression.asInstanceOf[LookupExpression], Map(primaryKey.asInstanceOf[EntityName] -> evaluationResult))
+              (parsedExpression.expression, Map(primaryKey -> evaluationResult))
             }
           }
-          expressionResults.use(IO.pure).unsafeToFuture().map {results =>
-            // todo: start here.. do we need to `groupBy` the results here? the types get funky and the types are matching right now
-            // funkiness:
-    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123")))
-    //            val res10: List[(String, scala.collection.immutable.Map[String,String])] = List((asdf,Map(asdfdsfdf -> f123)))
-    //
-    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123"))).groupBy(_._1)
-    //            val res11: scala.collection.immutable.Map[String,List[(String, scala.collection.immutable.Map[String,String])]] = HashMap(asdf -> List((asdf,Map(asdfdsfdf -> f123))))
-    //
-    //            scala> List(("asdf", Map("asdfdsfdf" -> "f123")), ("asdf", Map("222asdfdsfdf" -> "222f123"))).groupBy(_._1)
-    //            val res12: scala.collection.immutable.Map[String,List[(String, scala.collection.immutable.Map[String,String])]] = HashMap(asdf -> List((asdf,Map(asdfdsfdf -> f123)), (asdf,Map(222asdfdsfdf -> 222f123))))
-            val transformers = new Transformers(rootEntities)
-            transformers.transformAndParseExpr(results, parsedTree)
-          }
+          expressionResults.use(IO.pure).map {results =>
+            val groupedResults = results.groupBy{
+              case (expression, _) => expression
+            }.toSeq.map {
+              case (expression, groupedList) => (expression, groupedList.foldLeft(Map.empty[EntityName, Try[Iterable[AttributeValue]]]){
+                case (aggregateResults, (_, individualResult)) => aggregateResults ++ individualResult
+              }
+              )
+            }
+            val rootEntities = results.flatMap {
+              case (_, resultsMap) => resultsMap.keys
+            }.toSet.toSeq
+
+            val resultsByInput = gatherInputsResult.processableInputs.map { input =>
+              val parser = AntlrTerraExpressionParser.getParser(input.expression)
+              val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
+              val parsedTree = parser.root()
+              val lookupExpressions = visitor.visit(parsedTree).map { _.expression }
+
+              val transformers = new Transformers(Option(rootEntities))
+              val expressionResultsByEntityName = transformers.transformAndParseExpr(groupedResults.filter {
+                case (expression, _) => lookupExpressions.contains(expression)
+              }, parsedTree)
+
+              val validationValuesByEntity: Seq[(String, SubmissionValidationValue)] = expressionResultsByEntityName.map {
+                case (key, Success(attrSeq)) => key -> unpackResult(attrSeq.toSeq, input.workflowInput)
+                case (key, Failure(regret)) => key -> SubmissionValidationValue(None, Some(regret.getMessage), input.workflowInput.getName)
+              }.toSeq
+              validationValuesByEntity
+
+            }
+
+            CollectionUtils.groupByTuples(resultsByInput.toSeq.flatten)
+              .map({ case (entityName, values) => SubmissionValidationEntityInputs(entityName, values.toSet) }).toStream
+
+
+          }.unsafeToFuture
         }
 
       case _ => throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows"))
@@ -258,5 +278,44 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
   override def expressionValidator: ExpressionValidator =
     throw new UnsupportedEntityOperationException("expressionEvaluator not supported by this provider.")
+
+
+  private def unpackResult(mcSequence: Iterable[AttributeValue], wfInput: ToolInputParameter): SubmissionValidationValue = wfInput.getValueType.getTypeName match {
+    case TypeNameEnum.ARRAY => getArrayResult(wfInput.getName, mcSequence)
+    case TypeNameEnum.OPTIONAL  => if (wfInput.getValueType.getOptionalType.getTypeName == TypeNameEnum.ARRAY)
+      getArrayResult(wfInput.getName, mcSequence)
+    else getSingleResult(wfInput.getName, mcSequence, wfInput.getOptional) //send optional-arrays down the same codepath as arrays
+    case _ => getSingleResult(wfInput.getName, mcSequence, wfInput.getOptional)
+  }
+
+
+  private val emptyResultError = "Expected single value for workflow input, but evaluated result set was empty"
+  private val multipleResultError  = "Expected single value for workflow input, but evaluated result set had multiple values"
+
+  private def getSingleResult(inputName: String, seq: Iterable[AttributeValue], optional: Boolean): SubmissionValidationValue = {
+    def handleEmpty = if (optional) None else Some(emptyResultError)
+    seq match {
+      case Seq() => SubmissionValidationValue(None, handleEmpty, inputName)
+      case Seq(null) => SubmissionValidationValue(None, handleEmpty, inputName)
+      case Seq(AttributeNull) => SubmissionValidationValue(None, handleEmpty, inputName)
+      case Seq(singleValue) => SubmissionValidationValue(Some(singleValue), None, inputName)
+      case multipleValues => SubmissionValidationValue(Some(AttributeValueList(multipleValues.toSeq)), Some(multipleResultError), inputName)
+    }
+  }
+
+  private def getArrayResult(inputName: String, seq: Iterable[AttributeValue]): SubmissionValidationValue = {
+    val notNull: Seq[AttributeValue] = seq.filter(v => v != null && v != AttributeNull).toSeq
+    val attr = notNull match {
+      case Nil => Option(AttributeValueEmptyList)
+      //GAWB-2509: don't pack single-elem RawJson array results into another layer of array
+      //NOTE: This works, except for the following situation: a participant with a RawJson double-array attribute, in a single-element participant set.
+      // Evaluating this.participants.raw_json on the pset will incorrectly hit this case and return a 2D array when it should return a 3D array.
+      // The true fix for this is to look into why the slick expression evaluator wraps deserialized AttributeValues in a Seq, and instead
+      // return the proper result type, removing the need to infer whether it's a scalar or array type from the WDL input.
+      case AttributeValueRawJson(JsArray(_)) +: Seq() => Option(notNull.head)
+      case _ => Option(AttributeValueList(notNull))
+    }
+    SubmissionValidationValue(attr, None, inputName)
+  }
 
 }

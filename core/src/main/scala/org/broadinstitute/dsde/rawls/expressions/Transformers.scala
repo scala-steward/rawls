@@ -1,7 +1,7 @@
 package org.broadinstitute.dsde.rawls.expressions
 
 import org.antlr.v4.runtime.tree.ParseTree
-import org.broadinstitute.dsde.rawls.dataaccess.slick.EntityRecord
+import org.broadinstitute.dsde.rawls.expressions.Transformers._
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.ReconstructExpressionVisitor
 import org.broadinstitute.dsde.rawls.model.{AttributeBoolean, AttributeNull, AttributeNumber, AttributeString, AttributeValue, AttributeValueRawJson}
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsString, JsValue}
@@ -34,13 +34,7 @@ The overall approach is:
     )
   */
 
-class Transformers(val rootEntities: Option[Seq[EntityRecord]]) {
-  /**
-  These type aliases are to help differentiate between the Entity Name and the Lookup expressions in return types
-     in below functions. Since both of them are String, it becomes difficult to understand what is being referenced where.
-    */
-  private type EntityName = String
-  private type LookupExpression = String // attribute reference expression
+class Transformers(val rootEntityNames: Option[Seq[EntityName]]) {
 
 
   /**
@@ -152,8 +146,7 @@ class Transformers(val rootEntities: Option[Seq[EntityRecord]]) {
   def reconstructInputExprForEachEntity(mapOfEntityToEvaluatedExprMap: Map[EntityName, Try[Map[LookupExpression, JsValue]]],
                                         parsedTree: ParseTree): Map[EntityName, Try[JsValue]] = {
     // when there are no root entities handle as a single root entity with empty string for name
-    val rootEntityNames = rootEntities.map(_.map(_.name)).getOrElse(Seq(""))
-    rootEntityNames.map { entityName =>
+    rootEntityNames.getOrElse(Seq("")).map { entityName =>
       // in the case of literal JSON there are no LookupExpressions
       val evaluatedLookupMapTry = mapOfEntityToEvaluatedExprMap.getOrElse(entityName, Success(Map.empty[LookupExpression, JsValue]))
       val inputExprWithEvaluatedRef = evaluatedLookupMapTry.map { lookupMap =>
@@ -207,5 +200,16 @@ class Transformers(val rootEntities: Option[Seq[EntityRecord]]) {
     mapOfEntityToInputExpr.map { case (entityName, exprTry) => entityName -> JsonExpressionEvaluator.evaluate(exprTry) }
 
   }
+
+}
+
+object Transformers {
+  /**
+  These type aliases are to help differentiate between the Entity Name and the Lookup expressions in return types
+     in below functions. Since both of them are String, it becomes difficult to understand what is being referenced where.
+    */
+  type EntityName = String
+  type LookupExpression = String // attribute reference expression
+  type ExpressionAndResult = (LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])
 
 }

@@ -1,10 +1,11 @@
 package org.broadinstitute.dsde.rawls.expressions.parser.antlr
 
+import org.broadinstitute.dsde.rawls.expressions.Transformers._
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.TerraExpressionParser.EntityLookupContext
 
 import scala.collection.JavaConverters._
 
-case class ParsedDataRepoExpression(relationships: List[String], columnName: String, expression: String, tableAlias: String) {
+case class ParsedDataRepoExpression(relationships: List[String], columnName: String, expression: LookupExpression, tableAlias: String) {
   val qualifiedColumnName = s"$tableAlias.$columnName"
 }
 

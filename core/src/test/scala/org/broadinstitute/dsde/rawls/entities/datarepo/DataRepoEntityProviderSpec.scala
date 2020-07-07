@@ -2,18 +2,21 @@ package org.broadinstitute.dsde.rawls.entities.datarepo
 
 import java.util.UUID
 
-import bio.terra.datarepo.model.TableModel
+import bio.terra.datarepo.model.{ColumnModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription.ReferenceTypeEnum
 import com.google.cloud.PageImpl
-import com.google.cloud.bigquery.{BigQueryException, Field, FieldValueList, Schema, TableResult}
+import com.google.cloud.bigquery.{BigQueryException, Field, FieldValue, FieldValueList, LegacySQLTypeName, Schema, TableResult}
+import cromwell.client.model.{ToolInputParameter, ValueType}
 import org.broadinstitute.dsde.rawls.TestExecutionContext
 import org.broadinstitute.dsde.rawls.dataaccess.MockBigQueryServiceFactory
-import org.broadinstitute.dsde.rawls.dataaccess.MockBigQueryServiceFactory.{results, schema}
+import org.broadinstitute.dsde.rawls.dataaccess.MockBigQueryServiceFactory.{FV_BOOLEAN, FV_INTEGER, FV_TIMESTAMP, results, schema, stringKeys}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.TestDriverComponent
+import org.broadinstitute.dsde.rawls.entities.base.ExpressionEvaluationContext
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityNotFoundException, EntityTypeNotFoundException}
+import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.{GatherInputsResult, MethodInput}
 import org.broadinstitute.dsde.rawls.model.{DataReferenceName, _}
 import org.scalatest.{AsyncFlatSpec, Matchers}
-import spray.json.{JsArray, JsNumber, JsObject, JsString}
+import spray.json.{JsArray, JsBoolean, JsNumber, JsObject, JsString}
 
 import scala.collection.JavaConverters._
 
@@ -321,6 +324,52 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
       assertResult("Query succeeded, but returned 3 rows; expected one row.") { ex.getMessage }
     }
   }
+
+
+  behavior of "DataEntityProvider.evaluateExpressions()"
+
+  it should "do the happy path for basic expressions" in {
+
+    val F_INTEGER = Field.of("root.integer-field", LegacySQLTypeName.INTEGER)
+    val F_BOOLEAN = Field.of("root.boolean-field", LegacySQLTypeName.BOOLEAN)
+    val F_STRING = Field.of("root.datarepo_row_id", LegacySQLTypeName.STRING)
+    val F_TIMESTAMP = Field.of("root.timestamp-field", LegacySQLTypeName.TIMESTAMP)
+
+    val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+
+    val results = stringKeys map { stringKey  =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
+        FV_INTEGER, FV_BOOLEAN, FV_TIMESTAMP).asJava,
+        F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+    }
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, 3, page)
+
+
+    // set up a provider with a mock that returns ..
+    val provider = createTestProvider(dataRepoDAO = new SpecDataRepoDAO(Right(createSnapshotModel(List(new TableModel().name("table1").primaryKey(null).rowCount(3)
+      .columns(List("integer-field", "boolean-field", "timestamp-field").map(new ColumnModel().name(_)).asJava))))), bqFactory = MockBigQueryServiceFactory.ioFactory(Right(tableResult)))
+    val expressionEvaluationContext = ExpressionEvaluationContext(None, None, None, Option("table1"))
+    val gatherInputsResult = GatherInputsResult(Set(
+      MethodInput(new ToolInputParameter().name("name1").valueType(new ValueType().typeName(ValueType.TypeNameEnum.INT)), "this.integer-field"),
+      MethodInput(new ToolInputParameter().name("name2").valueType(new ValueType().typeName(ValueType.TypeNameEnum.BOOLEAN)), "this.boolean-field"),
+      MethodInput(new ToolInputParameter().name("name3").valueType(new ValueType().typeName(ValueType.TypeNameEnum.OBJECT)), """{"foo": this.boolean-field, "bar": this.timestamp-field}"""))
+      ,
+      Set.empty, Set.empty, Set.empty)
+    provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult) map { submissionValidationEntityInputs =>
+      val expectedResults = stringKeys map { stringKey =>
+        SubmissionValidationEntityInputs(stringKey, Set(
+          SubmissionValidationValue(Some(AttributeValueRawJson(JsNumber(MockBigQueryServiceFactory.FV_INTEGER.getNumericValue))), None, "name1"),
+          SubmissionValidationValue(Some(AttributeValueRawJson(JsBoolean(MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue))), None, "name2"),
+          SubmissionValidationValue(Some(AttributeValueRawJson(s"""{"foo": ${MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue}, "bar": "${MockBigQueryServiceFactory.FV_TIMESTAMP.getStringValue}"}""")), None, "name3")
+        ))
+      }
+      submissionValidationEntityInputs should contain theSameElementsAs expectedResults
+    }
+  }
+
 
 }
 

@@ -69,7 +69,7 @@ class ExpressionEvaluator(slickEvaluator: SlickExpressionEvaluator, val rootEnti
         */
 
         localFinalAttributeEvaluationVisitor.visit(parsedTree).map { result =>
-          val transformers = new Transformers(rootEntities)
+          val transformers = new Transformers(rootEntities.map(_.map(_.name)))
           transformers.transformAndParseExpr(result, parsedTree)
         }
 
