@@ -16,7 +16,7 @@ import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, E
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.{GatherInputsResult, MethodInput}
 import org.broadinstitute.dsde.rawls.model.{DataReferenceName, _}
 import org.scalatest.{AsyncFlatSpec, Matchers}
-import spray.json.{JsArray, JsBoolean, JsNumber, JsObject, JsString}
+import spray.json.{JsArray, JsNumber, JsObject, JsString}
 
 import scala.collection.JavaConverters._
 
@@ -359,13 +359,13 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
       ,
       Set.empty, Set.empty, Set.empty)
     provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult) map { submissionValidationEntityInputs =>
-      val expectedResults = stringKeys map { stringKey =>
+      val expectedResults = (stringKeys map { stringKey =>
         SubmissionValidationEntityInputs(stringKey, Set(
-          SubmissionValidationValue(Some(AttributeValueRawJson(JsNumber(MockBigQueryServiceFactory.FV_INTEGER.getNumericValue))), None, "name1"),
-          SubmissionValidationValue(Some(AttributeValueRawJson(JsBoolean(MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue))), None, "name2"),
+          SubmissionValidationValue(Some(AttributeNumber(MockBigQueryServiceFactory.FV_INTEGER.getNumericValue)), None, "name1"),
+          SubmissionValidationValue(Some(AttributeBoolean(MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue)), None, "name2"),
           SubmissionValidationValue(Some(AttributeValueRawJson(s"""{"foo": ${MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue}, "bar": "${MockBigQueryServiceFactory.FV_TIMESTAMP.getStringValue}"}""")), None, "name3")
         ))
-      }
+      }).toStream
       submissionValidationEntityInputs should contain theSameElementsAs expectedResults
     }
   }
