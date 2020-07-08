@@ -5,7 +5,7 @@ import java.util.UUID
 import akka.http.scaladsl.model.StatusCodes
 import bio.terra.datarepo.model.TableModel
 import bio.terra.workspace.model.DataReferenceDescription.ReferenceTypeEnum
-import cats.effect.{IO, Resource}
+import cats.effect.{ContextShift, IO, Resource}
 import cats.implicits._
 import com.google.cloud.bigquery.{QueryJobConfiguration, QueryParameterValue, TableResult}
 import com.typesafe.scalalogging.LazyLogging
@@ -16,7 +16,7 @@ import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityTypeNotFoundException, UnsupportedEntityOperationException}
 import org.broadinstitute.dsde.rawls.expressions.Transformers
-import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor}
+import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor, ParsedDataRepoExpression}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
 import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeNull, AttributeValue, AttributeValueEmptyList, AttributeValueList, AttributeValueRawJson, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, SubmissionValidationValue, TerraDataRepoSnapshotRequest}
@@ -173,109 +173,132 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] = {
     expressionEvaluationContext match {
       case ExpressionEvaluationContext(None, None, None, Some(rootEntityType)) =>
+        implicit val contextShift: ContextShift[IO] = IO.contextShift(executionContext)
         val baseTableAlias = "root"
+        val resultIO = for {
+          parsedExpressions <- parseAllExpressions(gatherInputsResult, baseTableAlias)
+          tableModel = getTableModel(rootEntityType)
+          _ <- assertDataNotTooBig(parsedExpressions, tableModel)
+          entityNameColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
+          bqQueryJobConfigs = generateBigQueryJobConfigs(parsedExpressions, tableModel, entityNameColumn, baseTableAlias)
+          petKey <- IO.fromFuture(IO(samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail)))
+          expressionResults <- runBigQueryQueries(entityNameColumn, bqQueryJobConfigs, petKey)
+        } yield {
+          val groupedResults = groupResultsByExpressionAndEntityName(expressionResults)
+          val rootEntities = expressionResults.flatMap {
+            case (_, resultsMap) => resultsMap.keys
+          }.distinct
 
-        val parsedExpressions = gatherInputsResult.processableInputs.flatMap { input =>
-          val parser = AntlrTerraExpressionParser.getParser(input.expression)
-          val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
-          visitor.visit(parser.root())
+          val entityNameAndInputValues = constructInputsForEachEntity(gatherInputsResult, groupedResults, baseTableAlias, rootEntities)
+
+          CollectionUtils.groupByTuples(entityNameAndInputValues)
+            .map({ case (entityName, values) => SubmissionValidationEntityInputs(entityName, values.toSet) }).toStream
+        }
+        resultIO.unsafeToFuture()
+
+      case _ => Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows")))
+    }
+  }
+
+  private def assertDataNotTooBig(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel) = {
+    if (tableModel.getRowCount * parsedExpressions.size > 1000000) {
+      // todo: configure this number 100000 AND decide what to tell the user as a mitigation
+      IO.raiseError(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. Choose a table with fewer rows or a workflow configuration with fewer inputs.")))
+    } else {
+      IO.unit
+    }
+  }
+
+  private def constructInputsForEachEntity(gatherInputsResult: GatherInputsResult, groupedResults: Seq[(Transformers.LookupExpression, Map[Transformers.EntityName, Try[scala.Iterable[AttributeValue]]])], baseTableAlias: LookupExpression, rootEntities: List[EntityName]) = {
+    // gatherInputsResult.processableInputs.toSeq so that the result is not a Set and does not worry about duplicates
+    gatherInputsResult.processableInputs.toSeq.flatMap { input =>
+      val parser = AntlrTerraExpressionParser.getParser(input.expression)
+      val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
+      val parsedTree = parser.root()
+      val lookupExpressions = visitor.visit(parsedTree).map {
+        _.expression
+      }
+
+      val transformers = new Transformers(Option(rootEntities))
+      val expressionResultsByEntityName = transformers.transformAndParseExpr(groupedResults.filter {
+        case (expression, _) => lookupExpressions.contains(expression)
+      }, parsedTree)
+
+      val validationValuesByEntity: Seq[(EntityName, SubmissionValidationValue)] = expressionResultsByEntityName.map {
+        case (key, Success(attrSeq)) => key -> unpackResult(attrSeq.toSeq, input.workflowInput)
+        case (key, Failure(regret)) => key -> SubmissionValidationValue(None, Some(regret.getMessage), input.workflowInput.getName)
+      }.toSeq
+      validationValuesByEntity
+    }
+  }
+
+  private def groupResultsByExpressionAndEntityName(expressionResults: List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]) = {
+    expressionResults.groupBy {
+      case (expression, _) => expression
+    }.toSeq.map {
+      case (expression, groupedList) => (expression, groupedList.foldLeft(Map.empty[EntityName, Try[Iterable[AttributeValue]]]) {
+        case (aggregateResults, (_, individualResult)) => aggregateResults ++ individualResult
+      })
+    }
+  }
+
+  private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String) = {
+    (for {
+      bqService <- bqServiceFactory.getServiceForPet(petKey)
+      queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
+        case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
+      })
+    } yield {
+      if (queryResults.exists { case (_, tableResults) => tableResults.getTotalRows > 1000000 }) {
+        throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. This is likely a large one to many relationship.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
+      }
+      for {
+        (parsedExpressions, tableResult) <- queryResults
+        resultRow <- tableResult.iterateAll().asScala
+        parsedExpression <- parsedExpressions
+      } yield {
+        val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
+        val primaryKey: EntityName = resultRow.get(entityNameColumn).getStringValue
+        val attribute = fieldToAttribute(field, resultRow)
+        val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
+          case v: AttributeValue => Success(Seq(v))
+          case AttributeValueList(l) => Success(l)
+          case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
+        }
+        (parsedExpression.expression, Map(primaryKey -> evaluationResult))
+      }
+    }).use(IO.pure)
+  }
+
+  private def generateBigQueryJobConfigs(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel, entityNameColumn: String, baseTableAlias: String) = {
+    parsedExpressions.groupBy(_.relationships).map {
+      case (Nil, expressions) =>
+        val columnNames = expressions.map(_.columnName)
+        val validColumnNames = tableModel.getColumns.asScala.map(_.getName.toLowerCase).toSet
+
+        val invalidColumnNames = columnNames -- validColumnNames
+        if (invalidColumnNames.nonEmpty) {
+          // we should have validated all this already, this is just to be sure we don't get any sql injection
+          throw new RawlsException(s"invalid columns: ${invalidColumnNames.mkString(",")}")
         }
 
-        val tableModel = getTableModel(rootEntityType)
-        if (tableModel.getRowCount * parsedExpressions.size > 1000000) throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. Choose a table with fewer rows or a workflow configuration with fewer inputs.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
-        val pkColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
+        val dataProject = snapshotModel.getDataProject
+        // determine view name
+        val viewName = snapshotModel.getName
+        // generate BQ SQL for this entity
+        val query = s"SELECT $entityNameColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${tableModel.getName}` $baseTableAlias"
 
-        val bqQueryJobConfigs = parsedExpressions.groupBy(_.relationships).map {
-          case (Nil, expressions) =>
-            val columnNames = expressions.map(_.columnName)
-            val validColumnNames = tableModel.getColumns.asScala.map(_.getName.toLowerCase).toSet
+        (expressions, QueryJobConfiguration.newBuilder(query).build)
 
-            val invalidColumnNames = columnNames -- validColumnNames
-            if (invalidColumnNames.nonEmpty) {
-              // we should have validated all this already, this is just to be sure we don't get any sql injection
-              throw new RawlsException(s"invalid columns: ${invalidColumnNames.mkString(",")}")
-            }
+      case _ => throw new RawlsException("relations not implemented yet")
+    }
+  }
 
-            val dataProject = snapshotModel.getDataProject
-            // determine view name
-            val viewName = snapshotModel.getName
-            // generate BQ SQL for this entity
-            val query = s"SELECT $pkColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${tableModel.getName}` $baseTableAlias"
-
-            (expressions, QueryJobConfiguration.newBuilder(query).build)
-
-          case _ => throw new RawlsException("relations not implemented yet")
-        }
-
-        // get pet service account key for this user
-        samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail) flatMap { petKey =>
-
-          // get a BQ service (i.e. dao) instance, and use it to execute the query against BQ
-          val expressionResults = for {
-            bqService <- bqServiceFactory.getServiceForPet(petKey)
-            queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
-              case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
-            })
-          } yield {
-            if (queryResults.exists { case (_, tableResults) => tableResults.getTotalRows > 1000000}) {
-              throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. This is likely a large one to many relationship.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
-            }
-            for {
-              (parsedExpressions, tableResult) <- queryResults
-              resultRow <- tableResult.iterateAll().asScala
-              parsedExpression <- parsedExpressions
-            } yield {
-              val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
-              val primaryKey: EntityName = resultRow.get(pkColumn).getStringValue
-              val attribute = fieldToAttribute(field, resultRow)
-              val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
-                case v: AttributeValue => Success(Seq(v))
-                case AttributeValueList(l) => Success(l)
-                case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
-              }
-              (parsedExpression.expression, Map(primaryKey -> evaluationResult))
-            }
-          }
-          expressionResults.use(IO.pure).map {results =>
-            val groupedResults = results.groupBy{
-              case (expression, _) => expression
-            }.toSeq.map {
-              case (expression, groupedList) => (expression, groupedList.foldLeft(Map.empty[EntityName, Try[Iterable[AttributeValue]]]){
-                case (aggregateResults, (_, individualResult)) => aggregateResults ++ individualResult
-              }
-              )
-            }
-            val rootEntities = results.flatMap {
-              case (_, resultsMap) => resultsMap.keys
-            }.toSet.toSeq
-
-            val resultsByInput = gatherInputsResult.processableInputs.map { input =>
-              val parser = AntlrTerraExpressionParser.getParser(input.expression)
-              val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
-              val parsedTree = parser.root()
-              val lookupExpressions = visitor.visit(parsedTree).map { _.expression }
-
-              val transformers = new Transformers(Option(rootEntities))
-              val expressionResultsByEntityName = transformers.transformAndParseExpr(groupedResults.filter {
-                case (expression, _) => lookupExpressions.contains(expression)
-              }, parsedTree)
-
-              val validationValuesByEntity: Seq[(String, SubmissionValidationValue)] = expressionResultsByEntityName.map {
-                case (key, Success(attrSeq)) => key -> unpackResult(attrSeq.toSeq, input.workflowInput)
-                case (key, Failure(regret)) => key -> SubmissionValidationValue(None, Some(regret.getMessage), input.workflowInput.getName)
-              }.toSeq
-              validationValuesByEntity
-
-            }
-
-            CollectionUtils.groupByTuples(resultsByInput.toSeq.flatten)
-              .map({ case (entityName, values) => SubmissionValidationEntityInputs(entityName, values.toSet) }).toStream
-
-
-          }.unsafeToFuture
-        }
-
-      case _ => throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows"))
+  private def parseAllExpressions(gatherInputsResult: GatherInputsResult, baseTableAlias: LookupExpression): IO[Set[ParsedDataRepoExpression]] = IO {
+    gatherInputsResult.processableInputs.flatMap { input =>
+      val parser = AntlrTerraExpressionParser.getParser(input.expression)
+      val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
+      visitor.visit(parser.root())
     }
   }
 
