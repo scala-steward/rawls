@@ -200,7 +200,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
             // determine view name
             val viewName = snapshotModel.getName
             // generate BQ SQL for this entity
-            val query = s"SELECT $pkColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${rootEntityType}` $baseTableAlias"
+            val query = s"SELECT $pkColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${tableModel.getName}` $baseTableAlias"
 
             (expressions, QueryJobConfiguration.newBuilder(query).build)
 
@@ -217,6 +217,9 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
               case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
             })
           } yield {
+            if (queryResults.exists { case (_, tableResults) => tableResults.getTotalRows > 1000000}) {
+              throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. This is likely a large one to many relationship.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
+            }
             for {
               (parsedExpressions, tableResult) <- queryResults
               resultRow <- tableResult.iterateAll().asScala
