@@ -13,7 +13,7 @@ import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, SamDAO}
 import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
-import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionValidator}
+import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionEvaluationSupport, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityTypeNotFoundException, UnsupportedEntityOperationException}
 import org.broadinstitute.dsde.rawls.expressions.Transformers
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor, ParsedDataRepoExpression}
@@ -34,7 +34,7 @@ import scala.util.{Failure, Success, Try}
 class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspaceManagerDAO: WorkspaceManagerDAO,
                              dataRepoDAO: DataRepoDAO, samDAO: SamDAO, bqServiceFactory: GoogleBigQueryServiceFactory)
                             (implicit protected val executionContext: ExecutionContext)
-  extends EntityProvider with DataRepoBigQuerySupport with LazyLogging {
+  extends EntityProvider with DataRepoBigQuerySupport with LazyLogging with ExpressionEvaluationSupport {
 
   val workspace = requestArguments.workspace
   val userInfo = requestArguments.userInfo
@@ -191,8 +191,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
           val entityNameAndInputValues = constructInputsForEachEntity(gatherInputsResult, groupedResults, baseTableAlias, rootEntities)
 
-          CollectionUtils.groupByTuples(entityNameAndInputValues)
-            .map({ case (entityName, values) => SubmissionValidationEntityInputs(entityName, values.toSet) }).toStream
+          createSubmissionValidationEntityInputs(entityNameAndInputValues)
         }
         resultIO.unsafeToFuture()
 
@@ -224,11 +223,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
         case (expression, _) => lookupExpressions.contains(expression)
       }, parsedTree)
 
-      val validationValuesByEntity: Seq[(EntityName, SubmissionValidationValue)] = expressionResultsByEntityName.map {
-        case (key, Success(attrSeq)) => key -> unpackResult(attrSeq.toSeq, input.workflowInput)
-        case (key, Failure(regret)) => key -> SubmissionValidationValue(None, Some(regret.getMessage), input.workflowInput.getName)
-      }.toSeq
-      validationValuesByEntity
+      convertToSubmissionValidationValues(expressionResultsByEntityName, input)
     }
   }
 
@@ -304,44 +299,4 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
   override def expressionValidator: ExpressionValidator =
     throw new UnsupportedEntityOperationException("expressionEvaluator not supported by this provider.")
-
-
-  private def unpackResult(mcSequence: Iterable[AttributeValue], wfInput: ToolInputParameter): SubmissionValidationValue = wfInput.getValueType.getTypeName match {
-    case TypeNameEnum.ARRAY => getArrayResult(wfInput.getName, mcSequence)
-    case TypeNameEnum.OPTIONAL  => if (wfInput.getValueType.getOptionalType.getTypeName == TypeNameEnum.ARRAY)
-      getArrayResult(wfInput.getName, mcSequence)
-    else getSingleResult(wfInput.getName, mcSequence, wfInput.getOptional) //send optional-arrays down the same codepath as arrays
-    case _ => getSingleResult(wfInput.getName, mcSequence, wfInput.getOptional)
-  }
-
-
-  private val emptyResultError = "Expected single value for workflow input, but evaluated result set was empty"
-  private val multipleResultError  = "Expected single value for workflow input, but evaluated result set had multiple values"
-
-  private def getSingleResult(inputName: String, seq: Iterable[AttributeValue], optional: Boolean): SubmissionValidationValue = {
-    def handleEmpty = if (optional) None else Some(emptyResultError)
-    seq match {
-      case Seq() => SubmissionValidationValue(None, handleEmpty, inputName)
-      case Seq(null) => SubmissionValidationValue(None, handleEmpty, inputName)
-      case Seq(AttributeNull) => SubmissionValidationValue(None, handleEmpty, inputName)
-      case Seq(singleValue) => SubmissionValidationValue(Some(singleValue), None, inputName)
-      case multipleValues => SubmissionValidationValue(Some(AttributeValueList(multipleValues.toSeq)), Some(multipleResultError), inputName)
-    }
-  }
-
-  private def getArrayResult(inputName: String, seq: Iterable[AttributeValue]): SubmissionValidationValue = {
-    val notNull: Seq[AttributeValue] = seq.filter(v => v != null && v != AttributeNull).toSeq
-    val attr = notNull match {
-      case Nil => Option(AttributeValueEmptyList)
-      //GAWB-2509: don't pack single-elem RawJson array results into another layer of array
-      //NOTE: This works, except for the following situation: a participant with a RawJson double-array attribute, in a single-element participant set.
-      // Evaluating this.participants.raw_json on the pset will incorrectly hit this case and return a 2D array when it should return a 3D array.
-      // The true fix for this is to look into why the slick expression evaluator wraps deserialized AttributeValues in a Seq, and instead
-      // return the proper result type, removing the need to infer whether it's a scalar or array type from the WDL input.
-      case AttributeValueRawJson(JsArray(_)) +: Seq() => Option(notNull.head)
-      case _ => Option(AttributeValueList(notNull))
-    }
-    SubmissionValidationValue(attr, None, inputName)
-  }
-
 }
