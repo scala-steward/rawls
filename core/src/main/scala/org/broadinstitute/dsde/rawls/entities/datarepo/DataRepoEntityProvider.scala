@@ -16,16 +16,14 @@ import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionEvaluationSupport, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.{DataEntityException, EntityTypeNotFoundException, UnsupportedEntityOperationException}
 import org.broadinstitute.dsde.rawls.expressions.Transformers
-import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor, ParsedDataRepoExpression}
+import org.broadinstitute.dsde.rawls.expressions.Transformers._
+import org.broadinstitute.dsde.rawls.expressions.parser.antlr.{AntlrTerraExpressionParser, DataRepoEvaluateToAttributeVisitor, LookupExpressionExtractionVisitor, ParsedDataRepoExpression}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.model.DataReferenceModelJsonSupport.TerraDataRepoSnapshotRequestFormat
-import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeNull, AttributeValue, AttributeValueEmptyList, AttributeValueList, AttributeValueRawJson, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, SubmissionValidationValue, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeValue, AttributeValueList, DataReferenceName, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, SubmissionValidationValue, TerraDataRepoSnapshotRequest}
+import org.broadinstitute.dsde.rawls.util.CollectionUtils
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import spray.json._
-import Transformers._
-import cromwell.client.model.ToolInputParameter
-import cromwell.client.model.ValueType.TypeNameEnum
-import org.broadinstitute.dsde.rawls.util.CollectionUtils
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
@@ -182,12 +180,13 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
           entityNameColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
           bqQueryJobConfigs = generateBigQueryJobConfigs(parsedExpressions, tableModel, entityNameColumn, baseTableAlias)
           petKey <- IO.fromFuture(IO(samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail)))
-          expressionResults <- runBigQueryQueries(entityNameColumn, bqQueryJobConfigs, petKey)
-        } yield {
-          val groupedResults = groupResultsByExpressionAndEntityName(expressionResults)
-          val rootEntities = expressionResults.flatMap {
+          bqExpressionResults <- runBigQueryQueries(entityNameColumn, bqQueryJobConfigs, petKey)
+          rootEntities = bqExpressionResults.flatMap {
             case (_, resultsMap) => resultsMap.keys
           }.distinct
+          workspaceExpressionResults <- evaluateWorkspaceLookups(gatherInputsResult, rootEntities)
+        } yield {
+          val groupedResults = groupResultsByExpressionAndEntityName(bqExpressionResults ++ workspaceExpressionResults)
 
           val entityNameAndInputValues = constructInputsForEachEntity(gatherInputsResult, groupedResults, baseTableAlias, rootEntities)
 
@@ -197,6 +196,10 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
       case _ => Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Only root entity type supported for Data Repo workflows")))
     }
+  }
+
+  private def evaluateWorkspaceLookups(gatherInputsResults: GatherInputsResult, rootEntities: List[EntityName]): IO[List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]] = {
+
   }
 
   private def assertDataNotTooBig(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel) = {
@@ -212,11 +215,9 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     // gatherInputsResult.processableInputs.toSeq so that the result is not a Set and does not worry about duplicates
     gatherInputsResult.processableInputs.toSeq.flatMap { input =>
       val parser = AntlrTerraExpressionParser.getParser(input.expression)
-      val visitor = new DataRepoEvaluateToAttributeVisitor(baseTableAlias)
+      val visitor = new LookupExpressionExtractionVisitor()
       val parsedTree = parser.root()
-      val lookupExpressions = visitor.visit(parsedTree).map {
-        _.expression
-      }
+      val lookupExpressions = visitor.visit(parsedTree)
 
       val transformers = new Transformers(Option(rootEntities))
       val expressionResultsByEntityName = transformers.transformAndParseExpr(groupedResults.filter {
@@ -237,7 +238,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String) = {
+  private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String): IO[List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]] = {
     (for {
       bqService <- bqServiceFactory.getServiceForPet(petKey)
       queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
