@@ -191,7 +191,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
 
           val entityNameAndInputValues = constructInputsForEachEntity(gatherInputsResult, groupedResults, baseTableAlias, rootEntities)
 
-          createSubmissionValidationEntityInputs(entityNameAndInputValues)
+          createSubmissionValidationEntityInputs(CollectionUtils.groupByTuples(entityNameAndInputValues))
         }
         resultIO.unsafeToFuture()
 
@@ -208,7 +208,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def constructInputsForEachEntity(gatherInputsResult: GatherInputsResult, groupedResults: Seq[(Transformers.LookupExpression, Map[Transformers.EntityName, Try[scala.Iterable[AttributeValue]]])], baseTableAlias: LookupExpression, rootEntities: List[EntityName]) = {
+  private def constructInputsForEachEntity(gatherInputsResult: GatherInputsResult, groupedResults: Seq[(Transformers.LookupExpression, Map[Transformers.EntityName, Try[scala.Iterable[AttributeValue]]])], baseTableAlias: LookupExpression, rootEntities: List[EntityName]): Seq[(EntityName, SubmissionValidationValue)] = {
     // gatherInputsResult.processableInputs.toSeq so that the result is not a Set and does not worry about duplicates
     gatherInputsResult.processableInputs.toSeq.flatMap { input =>
       val parser = AntlrTerraExpressionParser.getParser(input.expression)

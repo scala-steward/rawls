@@ -10,7 +10,7 @@ import spray.json.JsArray
 import scala.util.{Failure, Success, Try}
 
 trait ExpressionEvaluationSupport {
-  protected def createSubmissionValidationEntityInputs(valuesByEntity: Seq[(EntityName, Seq[SubmissionValidationValue])]): Stream[SubmissionValidationEntityInputs] = {
+  protected def createSubmissionValidationEntityInputs(valuesByEntity: Map[EntityName, Seq[SubmissionValidationValue]]): Stream[SubmissionValidationEntityInputs] = {
     valuesByEntity.map({ case (entityName, values) => SubmissionValidationEntityInputs(entityName, values.toSet) }).toStream
   }
 

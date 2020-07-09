@@ -62,7 +62,7 @@ class LocalEntityProvider(workspace: Workspace, implicit protected val dataSourc
       withEntityRecsForExpressionEval(expressionEvaluationContext, workspace, dataAccess) { jobEntityRecs =>
         //Parse out the entity -> results map to a tuple of (successful, failed) SubmissionValidationEntityInputs
         evaluateExpressionsInternal(workspace, gatherInputsResult.processableInputs, jobEntityRecs, dataAccess) map { valuesByEntity =>
-          createSubmissionValidationEntityInputs(valuesByEntity.toSeq)
+          createSubmissionValidationEntityInputs(valuesByEntity)
         }
       }
     }
