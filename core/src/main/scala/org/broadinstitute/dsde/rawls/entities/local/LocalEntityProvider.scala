@@ -8,7 +8,7 @@ import org.broadinstitute.dsde.rawls.dataaccess.slick.{DataAccess, EntityRecord,
 import org.broadinstitute.dsde.rawls.entities.base.{EntityProvider, ExpressionEvaluationContext, ExpressionEvaluationSupport, ExpressionValidator}
 import org.broadinstitute.dsde.rawls.entities.exceptions.DeleteEntitiesConflictException
 import org.broadinstitute.dsde.rawls.expressions.ExpressionEvaluator
-import org.broadinstitute.dsde.rawls.expressions.Transformers.LookupExpression
+import org.broadinstitute.dsde.rawls.expressions.Transformers.{EntityName, LookupExpression}
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.{GatherInputsResult, MethodInput}
 import org.broadinstitute.dsde.rawls.model.{AttributeEntityReference, AttributeValue, Entity, EntityTypeMetadata, ErrorReport, SubmissionValidationEntityInputs, SubmissionValidationValue, Workspace}
 import org.broadinstitute.dsde.rawls.util.{CollectionUtils, EntitySupport}
@@ -87,7 +87,7 @@ class LocalEntityProvider(workspace: Workspace, implicit protected val dataSourc
         //Evaluate the results per input and return a seq of DBIO[ Map(entity -> value) ], one per input
         val resultsByInput = inputs.toSeq.map { input =>
           evaluator.evalFinalAttribute(workspaceContext, input.expression).asTry.map { tryAttribsByEntity =>
-            val validationValuesByEntity: Seq[(String, SubmissionValidationValue)] = tryAttribsByEntity match {
+            val validationValuesByEntity: Seq[(EntityName, SubmissionValidationValue)] = tryAttribsByEntity match {
               case Failure(regret) =>
                 //The DBIOAction failed - this input expression was not evaluated. Make an error for each entity.
                 entityNames.map((_, SubmissionValidationValue(None, Some(regret.getMessage), input.workflowInput.getName)))

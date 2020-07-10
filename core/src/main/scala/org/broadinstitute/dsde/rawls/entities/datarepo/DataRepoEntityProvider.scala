@@ -198,7 +198,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def populateWorkspaceLookupPerEntity(workspaceExpressionResults: Map[LookupExpression, Try[Iterable[AttributeValue]]], rootEntities: List[EntityName]): List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])] = {
+  private def populateWorkspaceLookupPerEntity(workspaceExpressionResults: Map[LookupExpression, Try[Iterable[AttributeValue]]], rootEntities: List[EntityName]): List[ExpressionAndResult] = {
     workspaceExpressionResults.toList.map { case(lookup, result) =>
       (lookup, rootEntities.map(_ -> result).toMap)
     }
@@ -230,7 +230,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def groupResultsByExpressionAndEntityName(expressionResults: List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]) = {
+  private def groupResultsByExpressionAndEntityName(expressionResults: List[ExpressionAndResult]) = {
     expressionResults.groupBy {
       case (expression, _) => expression
     }.toSeq.map {
@@ -240,7 +240,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String): IO[List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]] = {
+  private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String): IO[List[ExpressionAndResult]] = {
     (for {
       bqService <- bqServiceFactory.getServiceForPet(petKey)
       queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?

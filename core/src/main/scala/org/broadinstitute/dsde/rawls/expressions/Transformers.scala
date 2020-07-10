@@ -66,7 +66,7 @@ class Transformers(val rootEntityNames: Option[Seq[EntityName]]) {
             ("102", ("this.index", Try(JsNumber(456))))
           )
        */
-  def unpackAndTransformEvaluatedOutput(seqOfTuple: Seq[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])])
+  def unpackAndTransformEvaluatedOutput(seqOfTuple: Seq[ExpressionAndResult])
   : Seq[(EntityName, (LookupExpression, Try[JsValue]))] = {
     seqOfTuple.flatMap {
       case (lookupExpr, slickEvaluatedAttrValueMap) =>
@@ -171,7 +171,7 @@ class Transformers(val rootEntityNames: Option[Seq[EntityName]]) {
         "102" -> Try(Seq(AttributeValueRawJson("{"exampleRef1":"gs://def", "exampleIndex":456}")))
       )
    */
-  def transformAndParseExpr(seqOfLookupExprOp: Seq[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])],
+  def transformAndParseExpr(seqOfLookupExprOp: Seq[ExpressionAndResult],
                             parsedTree: ParseTree): Map[EntityName, Try[Iterable[AttributeValue]]] = {
     // unpack the evaluated AttributeValue to JsValue and transform it into sequence of tuples with entity name as key
     val seqOfEntityToLookupExprAndValue: Seq[(EntityName, (LookupExpression, Try[JsValue]))] = unpackAndTransformEvaluatedOutput(seqOfLookupExprOp)

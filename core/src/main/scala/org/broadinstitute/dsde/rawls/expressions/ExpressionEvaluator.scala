@@ -1,7 +1,7 @@
 package org.broadinstitute.dsde.rawls.expressions
 
 import org.broadinstitute.dsde.rawls.dataaccess.slick.{DataAccess, EntityRecord, ReadWriteAction}
-import org.broadinstitute.dsde.rawls.expressions.Transformers.LookupExpression
+import org.broadinstitute.dsde.rawls.expressions.Transformers.{EntityName, LookupExpression}
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr._
 import org.broadinstitute.dsde.rawls.model.{AttributeValue, Workspace}
 
@@ -55,7 +55,7 @@ class ExpressionEvaluator(slickEvaluator: SlickExpressionEvaluator, val rootEnti
         )
     )
     */
-  def evalFinalAttribute(workspaceContext: Workspace, expression: String)(implicit executionContext: ExecutionContext): ReadWriteAction[Map[String, Try[Iterable[AttributeValue]]]] = {
+  def evalFinalAttribute(workspaceContext: Workspace, expression: String)(implicit executionContext: ExecutionContext): ReadWriteAction[Map[EntityName, Try[Iterable[AttributeValue]]]] = {
 
     // parse expression using ANTLR TerraExpression parser
     val extendedJsonParser = AntlrTerraExpressionParser.getParser(expression)
