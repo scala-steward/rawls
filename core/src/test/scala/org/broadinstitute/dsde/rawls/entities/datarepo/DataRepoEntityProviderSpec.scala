@@ -19,6 +19,7 @@ import org.scalatest.{AsyncFlatSpec, Matchers}
 import spray.json.{JsArray, JsNumber, JsObject, JsString}
 
 import scala.collection.JavaConverters._
+import scala.util.Success
 
 class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProviderSpecSupport with TestDriverComponent with Matchers {
 
@@ -355,15 +356,17 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
     val gatherInputsResult = GatherInputsResult(Set(
       MethodInput(new ToolInputParameter().name("name1").valueType(new ValueType().typeName(ValueType.TypeNameEnum.INT)), "this.integer-field"),
       MethodInput(new ToolInputParameter().name("name2").valueType(new ValueType().typeName(ValueType.TypeNameEnum.BOOLEAN)), "this.boolean-field"),
-      MethodInput(new ToolInputParameter().name("name3").valueType(new ValueType().typeName(ValueType.TypeNameEnum.OBJECT)), """{"foo": this.boolean-field, "bar": this.timestamp-field}"""))
-      ,
-      Set.empty, Set.empty, Set.empty)
-    provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult) map { submissionValidationEntityInputs =>
+      MethodInput(new ToolInputParameter().name("workspace1").valueType(new ValueType().typeName(ValueType.TypeNameEnum.STRING)), "workspace.string"),
+      MethodInput(new ToolInputParameter().name("name3").valueType(new ValueType().typeName(ValueType.TypeNameEnum.OBJECT)), """{"foo": this.boolean-field, "bar": this.timestamp-field, "workspace": workspace.string}""")
+    ), Set.empty, Set.empty, Set.empty)
+
+    provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult, Map("workspace.string" -> Success(List(AttributeString("workspaceValue"))))) map { submissionValidationEntityInputs =>
       val expectedResults = (stringKeys map { stringKey =>
         SubmissionValidationEntityInputs(stringKey, Set(
           SubmissionValidationValue(Some(AttributeNumber(MockBigQueryServiceFactory.FV_INTEGER.getNumericValue)), None, "name1"),
           SubmissionValidationValue(Some(AttributeBoolean(MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue)), None, "name2"),
-          SubmissionValidationValue(Some(AttributeValueRawJson(s"""{"foo": ${MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue}, "bar": "${MockBigQueryServiceFactory.FV_TIMESTAMP.getStringValue}"}""")), None, "name3")
+          SubmissionValidationValue(Some(AttributeString("workspaceValue")), None, "workspace1"),
+          SubmissionValidationValue(Some(AttributeValueRawJson(s"""{"foo": ${MockBigQueryServiceFactory.FV_BOOLEAN.getBooleanValue}, "bar": "${MockBigQueryServiceFactory.FV_TIMESTAMP.getStringValue}", "workspace": "workspaceValue"}""")), None, "name3")
         ))
       })
       submissionValidationEntityInputs should contain theSameElementsAs expectedResults

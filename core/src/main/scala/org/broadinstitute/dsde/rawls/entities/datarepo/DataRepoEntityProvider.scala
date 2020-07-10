@@ -168,7 +168,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     tableAlias.map(alias => s"$alias.$pkColumn").getOrElse(pkColumn)
   }
 
-  override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult): Future[Stream[SubmissionValidationEntityInputs]] = {
+  override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult, workspaceExpressionResults: Map[LookupExpression, Try[Iterable[AttributeValue]]]): Future[Stream[SubmissionValidationEntityInputs]] = {
     expressionEvaluationContext match {
       case ExpressionEvaluationContext(None, None, None, Some(rootEntityType)) =>
         implicit val contextShift: ContextShift[IO] = IO.contextShift(executionContext)
@@ -184,9 +184,9 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
           rootEntities = bqExpressionResults.flatMap {
             case (_, resultsMap) => resultsMap.keys
           }.distinct
-          workspaceExpressionResults <- evaluateWorkspaceLookups(gatherInputsResult, rootEntities)
         } yield {
-          val groupedResults = groupResultsByExpressionAndEntityName(bqExpressionResults ++ workspaceExpressionResults)
+          val workspaceExpressionResultsPerEntity = populateWorkspaceLookupPerEntity(workspaceExpressionResults, rootEntities)
+          val groupedResults = groupResultsByExpressionAndEntityName(bqExpressionResults ++ workspaceExpressionResultsPerEntity)
 
           val entityNameAndInputValues = constructInputsForEachEntity(gatherInputsResult, groupedResults, baseTableAlias, rootEntities)
 
@@ -198,8 +198,10 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def evaluateWorkspaceLookups(gatherInputsResults: GatherInputsResult, rootEntities: List[EntityName]): IO[List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])]] = {
-
+  private def populateWorkspaceLookupPerEntity(workspaceExpressionResults: Map[LookupExpression, Try[Iterable[AttributeValue]]], rootEntities: List[EntityName]): List[(LookupExpression, Map[EntityName, Try[Iterable[AttributeValue]]])] = {
+    workspaceExpressionResults.toList.map { case(lookup, result) =>
+      (lookup, rootEntities.map(_ -> result).toMap)
+    }
   }
 
   private def assertDataNotTooBig(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel) = {

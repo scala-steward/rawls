@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.rawls.expressions
 
 import org.broadinstitute.dsde.rawls.dataaccess.slick.{DataAccess, EntityRecord, ReadWriteAction}
+import org.broadinstitute.dsde.rawls.expressions.Transformers.LookupExpression
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr._
 import org.broadinstitute.dsde.rawls.model.{AttributeValue, Workspace}
 
@@ -71,6 +72,22 @@ class ExpressionEvaluator(slickEvaluator: SlickExpressionEvaluator, val rootEnti
         localFinalAttributeEvaluationVisitor.visit(parsedTree).map { result =>
           val transformers = new Transformers(rootEntities.map(_.map(_.name)))
           transformers.transformAndParseExpr(result, parsedTree)
+        }
+
+      case Failure(regrets) => slickEvaluator.dataAccess.driver.api.DBIO.failed(regrets)
+    }
+  }
+
+  def evalWorkspaceExpressionsOnly(workspaceContext: Workspace, expression: String)(implicit executionContext: ExecutionContext): ReadWriteAction[Map[LookupExpression, Try[Iterable[AttributeValue]]]] = {
+    val extendedJsonParser = AntlrTerraExpressionParser.getParser(expression)
+    val localFinalAttributeEvaluationVisitor = new LocalEvaluateToAttributeVisitor(workspaceContext, slickEvaluator) with WorkspaceLookups
+
+    Try(extendedJsonParser.root()) match {
+      case Success(parsedTree) =>
+        localFinalAttributeEvaluationVisitor.visit(parsedTree).map { result =>
+          // workspace expression results do not vary by entity so just grab the head result
+          // ideally this is called with rootEntities None anyway
+          result.map { case (lookupExpression, valueByEntity) => lookupExpression -> valueByEntity.toSeq.head._2 }.toMap
         }
 
       case Failure(regrets) => slickEvaluator.dataAccess.driver.api.DBIO.failed(regrets)
