@@ -9,6 +9,7 @@ import cats.effect.{ContextShift, IO, Resource}
 import cats.implicits._
 import com.google.cloud.bigquery.{QueryJobConfiguration, QueryParameterValue, TableResult}
 import com.typesafe.scalalogging.LazyLogging
+import org.broadinstitute.dsde.rawls.config.DataRepoEntityProviderConfig
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, SamDAO}
@@ -30,7 +31,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspaceManagerDAO: WorkspaceManagerDAO,
-                             dataRepoDAO: DataRepoDAO, samDAO: SamDAO, bqServiceFactory: GoogleBigQueryServiceFactory)
+                             dataRepoDAO: DataRepoDAO, samDAO: SamDAO, bqServiceFactory: GoogleBigQueryServiceFactory,
+                             config: DataRepoEntityProviderConfig)
                             (implicit protected val executionContext: ExecutionContext)
   extends EntityProvider with DataRepoBigQuerySupport with LazyLogging with ExpressionEvaluationSupport {
 
@@ -176,7 +178,7 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
         val resultIO = for {
           parsedExpressions <- parseAllExpressions(gatherInputsResult, baseTableAlias)
           tableModel = getTableModel(rootEntityType)
-          _ <- assertDataNotTooBig(parsedExpressions, tableModel)
+          _ <- checkSubmissionSize(parsedExpressions, tableModel)
           entityNameColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
           bqQueryJobConfigs = generateBigQueryJobConfigs(parsedExpressions, tableModel, entityNameColumn, baseTableAlias)
           petKey <- IO.fromFuture(IO(samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail)))
@@ -204,10 +206,9 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
     }
   }
 
-  private def assertDataNotTooBig(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel) = {
-    if (tableModel.getRowCount * parsedExpressions.size > 1000000) {
-      // todo: configure this number 100000 AND decide what to tell the user as a mitigation
-      IO.raiseError(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. Choose a table with fewer rows or a workflow configuration with fewer inputs.")))
+  private def checkSubmissionSize(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel) = {
+    if (tableModel.getRowCount * parsedExpressions.size > config.maxInputsPerSubmission) {
+      IO.raiseError(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, s"Too many results. Snapshot row count * number of entity expressions cannot exceed ${config.maxInputsPerSubmission}.")))
     } else {
       IO.unit
     }
@@ -241,31 +242,40 @@ class DataRepoEntityProvider(requestArguments: EntityRequestArguments, workspace
   }
 
   private def runBigQueryQueries(entityNameColumn: String, bqQueryJobConfigs: Map[Set[ParsedDataRepoExpression], QueryJobConfiguration], petKey: String): IO[List[ExpressionAndResult]] = {
-    (for {
-      bqService <- bqServiceFactory.getServiceForPet(petKey)
-      queryResults <- Resource.liftF(bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
-        case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
-      })
-    } yield {
-      if (queryResults.exists { case (_, tableResults) => tableResults.getTotalRows > 1000000 }) {
-        throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, "Too many results. This is likely a large one to many relationship.")) // todo: configure this number 100000 AND decide what to tell the user as a mitigation
-      }
+    bqServiceFactory.getServiceForPet(petKey).use { bqService =>
       for {
-        (parsedExpressions, tableResult) <- queryResults
-        resultRow <- tableResult.iterateAll().asScala
-        parsedExpression <- parsedExpressions
-      } yield {
-        val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
-        val primaryKey: EntityName = resultRow.get(entityNameColumn).getStringValue
-        val attribute = fieldToAttribute(field, resultRow)
-        val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
-          case v: AttributeValue => Success(Seq(v))
-          case AttributeValueList(l) => Success(l)
-          case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
+        queryResults <- bqQueryJobConfigs.toList.traverse { // should we do parTraverse?
+          case (expressions, bqJob) => bqService.query(bqJob).map(expressions -> _)
         }
-        (parsedExpression.expression, Map(primaryKey -> evaluationResult))
+        _ <- checkQuerySize(queryResults)
+      } yield {
+        for {
+          (parsedExpressions, tableResult) <- queryResults
+          resultRow <- tableResult.iterateAll().asScala
+          parsedExpression <- parsedExpressions
+        } yield {
+          val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
+          val primaryKey: EntityName = resultRow.get(entityNameColumn).getStringValue
+          val attribute = fieldToAttribute(field, resultRow)
+          val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
+            case v: AttributeValue => Success(Seq(v))
+            case AttributeValueList(l) => Success(l)
+            case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
+          }
+          (parsedExpression.expression, Map(primaryKey -> evaluationResult))
+        }
       }
-    }).use(IO.pure)
+    }
+  }
+
+  private def checkQuerySize(queryResults: List[(Set[ParsedDataRepoExpression], TableResult)]): IO[Unit] = {
+    queryResults.traverse { case (queryResult, tableResults) =>
+      if (tableResults.getTotalRows > config.maxRowsPerQuery) {
+        IO.raiseError(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, s"Too many results. Results size ${tableResults.getTotalRows} cannot exceed ${config.maxRowsPerQuery}. Expression(s): [${queryResult.map(_.expression).mkString(", ")}].")))
+      } else {
+        IO.unit
+      }
+    }.void
   }
 
   private def generateBigQueryJobConfigs(parsedExpressions: Set[ParsedDataRepoExpression], tableModel: TableModel, entityNameColumn: String, baseTableAlias: String) = {

@@ -6,6 +6,7 @@ import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import bio.terra.datarepo.model.{ColumnModel, SnapshotModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription
 import bio.terra.workspace.model.DataReferenceDescription.{CloningInstructionsEnum, ReferenceTypeEnum}
+import org.broadinstitute.dsde.rawls.config.DataRepoEntityProviderConfig
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, MockBigQueryServiceFactory, SamDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.entities.EntityRequestArguments
 import org.broadinstitute.dsde.rawls.mock.{MockDataRepoDAO, MockSamDAO, MockWorkspaceManagerDAO}
@@ -41,7 +42,7 @@ trait DataRepoEntityProviderSpecSupport {
                          bqFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(),
                          entityRequestArguments: EntityRequestArguments = EntityRequestArguments(workspace, userInfo, Some(DataReferenceName("referenceName")))
                         ): DataRepoEntityProvider = {
-    new DataRepoEntityProvider(entityRequestArguments, workspaceManagerDAO, dataRepoDAO, samDAO, bqFactory)
+    new DataRepoEntityProvider(entityRequestArguments, workspaceManagerDAO, dataRepoDAO, samDAO, bqFactory, DataRepoEntityProviderConfig(100, 10))
   }
 
 
