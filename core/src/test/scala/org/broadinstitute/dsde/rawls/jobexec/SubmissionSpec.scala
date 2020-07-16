@@ -8,6 +8,8 @@ import akka.stream.ActorMaterializer
 import akka.testkit.TestKit
 import bio.terra.datarepo.model.{ColumnModel, TableModel}
 import bio.terra.workspace.model.DataReferenceDescription
+import com.google.cloud.PageImpl
+import com.google.cloud.bigquery.{Field, FieldValue, FieldValueList, LegacySQLTypeName, Schema, TableResult}
 import com.typesafe.config.ConfigFactory
 import org.broadinstitute.dsde.rawls.config.{DataRepoEntityProviderConfig, DeploymentManagerConfig, MethodRepoConfig}
 import org.broadinstitute.dsde.rawls.coordination.UncoordinatedDataSourceAccess
@@ -16,7 +18,6 @@ import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
 import org.broadinstitute.dsde.rawls.dataaccess.slick.{TestData, TestDriverComponent}
 import org.broadinstitute.dsde.rawls.entities.EntityManager
 import org.broadinstitute.dsde.rawls.entities.datarepo.DataRepoEntityProviderSpecSupport
-import org.broadinstitute.dsde.rawls.entities.exceptions.UnsupportedEntityOperationException
 import org.broadinstitute.dsde.rawls.genomics.GenomicsService
 import org.broadinstitute.dsde.rawls.google.MockGooglePubSubDAO
 import org.broadinstitute.dsde.rawls.metrics.StatsDTestUtils
@@ -281,7 +282,8 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
   def withDataAndService[T](
       testCode: WorkspaceService => T,
       withDataOp: (SlickDataSource => T) => T,
-      executionServiceDAO: ExecutionServiceDAO = new HttpExecutionServiceDAO(mockServer.mockServerBaseUrl, workbenchMetricBaseName) ): T = {
+      executionServiceDAO: ExecutionServiceDAO = new HttpExecutionServiceDAO(mockServer.mockServerBaseUrl, workbenchMetricBaseName),
+      bigQueryServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory()): T = {
 
     withDataOp { dataSource =>
       val execServiceCluster: ExecutionServiceCluster = MockShardedExecutionServiceCluster.fromDAO(executionServiceDAO, dataSource)
@@ -333,7 +335,6 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
       val bondApiDAO: BondApiDAO = new MockBondApiDAO(bondBaseUrl = "bondUrl")
       val requesterPaysSetupService = new RequesterPaysSetupService(slickDataSource, gcsDAO, bondApiDAO, requesterPaysRole = "requesterPaysRole")
 
-      val bigQueryServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory()
       val entityManager = EntityManager.defaultEntityManager(dataSource, workspaceManagerDAO, dataRepoDAO, samDAO, bigQueryServiceFactory, DataRepoEntityProviderConfig(100, 10))
 
       val workspaceServiceConstructor = WorkspaceService.constructor(
@@ -1065,32 +1066,45 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
     }
   }
 
-  it should "validate data repo submission" in withDataAndService ({ workspaceService =>
-    val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService)
-    val submissionRq = SubmissionRequest(
-      methodConfigurationNamespace = methodConfig.namespace,
-      methodConfigurationName = methodConfig.name,
-      entityType = None,
-      entityName = None,
-      expression = None,
-      useCallCache = false,
-      deleteIntermediateOutputFiles = false
-    )
+  it should "validate data repo submission" in {
+    val rowIdField = Field.of("root.datarepo_row_id", LegacySQLTypeName.STRING)
+    val valueField = Field.of("root.value", LegacySQLTypeName.STRING)
+    val schema: Schema = Schema.of(rowIdField, valueField)
 
-    // TODO: current code does not support expression eval, if the code gets that far though, validation passed. Do a better check once expression eval is supported, see the following commented code
-    val ex = intercept[UnsupportedEntityOperationException] {
-      Await.result(workspaceService.validateSubmission( minimalTestData.wsName, submissionRq ), Duration.Inf)
+    val stringKeys = List("the first row")
+
+    val results = stringKeys map { stringKey  =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, "resultVal")).asJava,
+        rowIdField, valueField)
     }
-    ex.getMessage shouldBe "evaluateExpressions not supported by this provider."
-//    val vComplete = Await.result(workspaceService.validateSubmission( minimalTestData.wsName, submissionRq ), Duration.Inf).asInstanceOf[RequestComplete[(StatusCode, SubmissionValidationReport)]]
-//    val (vStatus, vData) = vComplete.response
-//    assertResult(StatusCodes.OK) {
-//      vStatus
-//    }
-//
-//    assertResult(1) { vData.validEntities.length }
-//    assert(vData.invalidEntities.isEmpty)
-  }, withMinimalTestDatabase[Any])
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, 1, page)
+
+    withDataAndService ({ workspaceService =>
+      val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService)
+      val submissionRq = SubmissionRequest(
+        methodConfigurationNamespace = methodConfig.namespace,
+        methodConfigurationName = methodConfig.name,
+        entityType = None,
+        entityName = None,
+        expression = None,
+        useCallCache = false,
+        deleteIntermediateOutputFiles = false
+      )
+
+      val vComplete = Await.result(workspaceService.validateSubmission( minimalTestData.wsName, submissionRq ), Duration.Inf).asInstanceOf[RequestComplete[(StatusCode, SubmissionValidationReport)]]
+      val (vStatus, vData) = vComplete.response
+      assertResult(StatusCodes.OK) {
+        vStatus
+      }
+
+      assertResult(1) { vData.validEntities.length }
+      assert(vData.invalidEntities.isEmpty)
+    }, withMinimalTestDatabase[Any], bigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(Right(tableResult)))
+  }
 
   it should "report error when data reference exists with entity name" in withDataAndService ({ workspaceService =>
     val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService)
