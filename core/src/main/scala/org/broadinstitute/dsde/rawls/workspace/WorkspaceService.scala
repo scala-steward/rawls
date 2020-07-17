@@ -1389,7 +1389,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         )
       }
 
-      val submissionEntityOpt = if (header.entityType.isEmpty) {
+      val submissionEntityOpt = if (header.entityType.isEmpty || submissionRequest.entityName.isEmpty) {
         None
       } else {
         Some(AttributeEntityReference(entityType = submissionRequest.entityType.get, entityName = submissionRequest.entityName.get))

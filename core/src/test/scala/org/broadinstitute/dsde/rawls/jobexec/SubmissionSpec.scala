@@ -1067,8 +1067,8 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
   }
 
   it should "validate data repo submission" in {
-    val rowIdField = Field.of("root.datarepo_row_id", LegacySQLTypeName.STRING)
-    val valueField = Field.of("root.value", LegacySQLTypeName.STRING)
+    val rowIdField = Field.of("datarepo_row_id", LegacySQLTypeName.STRING)
+    val valueField = Field.of("value", LegacySQLTypeName.STRING)
     val schema: Schema = Schema.of(rowIdField, valueField)
 
     val stringKeys = List("the first row")

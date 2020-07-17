@@ -102,14 +102,13 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, requestArguments: Ent
     }
   }
 
-  def pkFromSnapshotTable(tableModel: TableModel, tableAlias: Option[String] = None): String = {
+  def pkFromSnapshotTable(tableModel: TableModel): String = {
     // If data repo returns one and only one primary key, use it.
     // If data repo returns null or a compound PK, use the built-in rowid for pk instead.
-    val pkColumn = scala.Option(tableModel.getPrimaryKey) match {
+    scala.Option(tableModel.getPrimaryKey) match {
       case Some(pk) if pk.size() == 1 => pk.asScala.head
       case _ => datarepoRowIdColumn // default data repo value
     }
-    tableAlias.map(alias => s"$alias.$pkColumn").getOrElse(pkColumn)
   }
 
   override def evaluateExpressions(expressionEvaluationContext: ExpressionEvaluationContext, gatherInputsResult: GatherInputsResult, workspaceExpressionResults: Map[LookupExpression, Try[Iterable[AttributeValue]]]): Future[Stream[SubmissionValidationEntityInputs]] = {
@@ -121,7 +120,7 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, requestArguments: Ent
           parsedExpressions <- parseAllExpressions(gatherInputsResult, baseTableAlias)
           tableModel = getTableModel(rootEntityType)
           _ <- checkSubmissionSize(parsedExpressions, tableModel)
-          entityNameColumn = pkFromSnapshotTable(tableModel, Option(baseTableAlias))
+          entityNameColumn = pkFromSnapshotTable(tableModel)
           bqQueryJobConfigs = generateBigQueryJobConfigs(parsedExpressions, tableModel, entityNameColumn, baseTableAlias)
           petKey <- IO.fromFuture(IO(samDAO.getPetServiceAccountKeyForUser(googleProject, requestArguments.userInfo.userEmail)))
           bqExpressionResults <- runBigQueryQueries(entityNameColumn, bqQueryJobConfigs, petKey)
@@ -196,7 +195,7 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, requestArguments: Ent
           resultRow <- tableResult.iterateAll().asScala
           parsedExpression <- parsedExpressions
         } yield {
-          val field = tableResult.getSchema.getFields.get(parsedExpression.qualifiedColumnName) // is case sensitivity an issue on columnName?
+          val field = tableResult.getSchema.getFields.get(parsedExpression.columnName) // is case sensitivity an issue on columnName?
           val primaryKey: EntityName = resultRow.get(entityNameColumn).getStringValue
           val attribute = fieldToAttribute(field, resultRow)
           val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
@@ -236,7 +235,7 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, requestArguments: Ent
         // determine view name
         val viewName = snapshotModel.getName
         // generate BQ SQL for this entity
-        val query = s"SELECT $entityNameColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${tableModel.getName}` $baseTableAlias"
+        val query = s"SELECT $baseTableAlias.$entityNameColumn, ${expressions.map(_.qualifiedColumnName).mkString(", ")} FROM `${dataProject}.${viewName}.${tableModel.getName}` $baseTableAlias"
 
         (expressions, QueryJobConfiguration.newBuilder(query).build)
 
