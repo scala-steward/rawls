@@ -589,7 +589,7 @@ class SubmissionApiServiceSpec extends ApiServiceSpec with TableDrivenPropertyCh
         val entities = for (i <- 1 to count) yield Entity(i.toString, status.toString, Map.empty)
         runAndWait(entityQuery.save(context, entities))
         val workflows = for (i <- 1 to count) yield Workflow(Option(s"workflow${i}_of_$count"), status, testDate, Some(AttributeEntityReference(status.toString, i.toString)), testData.inputResolutions)
-        runAndWait(workflowQuery.createWorkflows(context, UUID.fromString(testData.submissionUpdateEntity.submissionId), workflows))
+        runAndWait(workflowQuery.createWorkflows(context, UUID.fromString(testData.submissionUpdateEntity.submissionId), workflows, None))
       }
     }
 

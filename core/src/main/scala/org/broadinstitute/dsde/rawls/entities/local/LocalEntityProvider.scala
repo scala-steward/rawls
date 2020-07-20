@@ -25,6 +25,8 @@ class LocalEntityProvider(workspace: Workspace, implicit protected val dataSourc
 
   import dataSource.dataAccess.driver.api._
 
+  override val entityStoreId: Option[String] = None
+
   private val workspaceContext = workspace
 
   override def entityTypeMetadata(): Future[Map[String, EntityTypeMetadata]] = {

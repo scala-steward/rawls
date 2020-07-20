@@ -1328,7 +1328,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       _ = validationResult.get
 
       methodConfigInputs = gatherInputsResult.processableInputs.map { methodInput => SubmissionValidationInput(methodInput.workflowInput.getName, methodInput.expression) }
-      header = SubmissionValidationHeader(methodConfig.rootEntityType, methodConfigInputs)
+      header = SubmissionValidationHeader(methodConfig.rootEntityType, methodConfigInputs, entityProvider.entityStoreId)
 
       workspaceExpressionResults <- evaluateWorkspaceExpressions(workspaceContext, gatherInputsResult)
       submissionParameters <- entityProvider.evaluateExpressions(ExpressionEvaluationContext(submissionRequest.entityType, submissionRequest.entityName, submissionRequest.expression, methodConfig.rootEntityType), gatherInputsResult, workspaceExpressionResults)
@@ -1405,7 +1405,11 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         status = SubmissionStatuses.Submitted,
         useCallCache = submissionRequest.useCallCache,
         deleteIntermediateOutputFiles = submissionRequest.deleteIntermediateOutputFiles,
-        workflowFailureMode = workflowFailureMode
+        workflowFailureMode = workflowFailureMode,
+        externalEntityInfo = for {
+          entityType <- header.entityType
+          dataStoreId <- header.entityStoreId
+        } yield ExternalEntityInfo(dataStoreId, entityType)
       )
 
       // implicitly passed to SubmissionComponent.create

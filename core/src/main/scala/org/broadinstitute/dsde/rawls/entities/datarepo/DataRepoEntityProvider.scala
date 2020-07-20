@@ -29,6 +29,8 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, requestArguments: Ent
                             (implicit protected val executionContext: ExecutionContext)
   extends EntityProvider with DataRepoBigQuerySupport with LazyLogging with ExpressionEvaluationSupport {
 
+  override val entityStoreId: Option[String] = Option(snapshotModel.getId)
+
   val datarepoRowIdColumn = "datarepo_row_id"
 
   private lazy val googleProject = {

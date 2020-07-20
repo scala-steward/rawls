@@ -170,10 +170,10 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
 
   it should "do the happy path for basic expressions" in {
 
-    val F_INTEGER = Field.of("root.integer-field", LegacySQLTypeName.INTEGER)
-    val F_BOOLEAN = Field.of("root.boolean-field", LegacySQLTypeName.BOOLEAN)
-    val F_STRING = Field.of("root.datarepo_row_id", LegacySQLTypeName.STRING)
-    val F_TIMESTAMP = Field.of("root.timestamp-field", LegacySQLTypeName.TIMESTAMP)
+    val F_INTEGER = Field.of("integer-field", LegacySQLTypeName.INTEGER)
+    val F_BOOLEAN = Field.of("boolean-field", LegacySQLTypeName.BOOLEAN)
+    val F_STRING = Field.of("datarepo_row_id", LegacySQLTypeName.STRING)
+    val F_TIMESTAMP = Field.of("timestamp-field", LegacySQLTypeName.TIMESTAMP)
 
     val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
 

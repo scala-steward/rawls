@@ -11,6 +11,7 @@ import scala.util.Try
  * trait definition for entity providers.
  */
 trait EntityProvider {
+  def entityStoreId: Option[String]
 
   def entityTypeMetadata(): Future[Map[String, EntityTypeMetadata]]
 
