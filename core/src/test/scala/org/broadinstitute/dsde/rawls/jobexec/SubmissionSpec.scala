@@ -1067,21 +1067,9 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
   }
 
   it should "validate data repo submission" in {
-    val rowIdField = Field.of("datarepo_row_id", LegacySQLTypeName.STRING)
-    val valueField = Field.of("value", LegacySQLTypeName.STRING)
-    val schema: Schema = Schema.of(rowIdField, valueField)
-
-    val stringKeys = List("the first row")
-
-    val results = stringKeys map { stringKey  =>
-      FieldValueList.of(List(
-        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
-        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, "resultVal")).asJava,
-        rowIdField, valueField)
-    }
-
-    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
-    val tableResult: TableResult = new TableResult(schema, 1, page)
+    val dataRepoRowIds = List.fill(3)(UUID.randomUUID().toString)
+    val resultVals = dataRepoRowIds.map(id => id -> s"resultVal $id").toMap
+    val tableResult: TableResult = prepareBqData(dataRepoRowIds, resultVals)
 
     withDataAndService ({ workspaceService =>
       val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService)
@@ -1101,9 +1089,88 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
         vStatus
       }
 
-      assertResult(1) { vData.validEntities.length }
+      val expectedValidInputs = dataRepoRowIds.map(rowId => SubmissionValidationEntityInputs(rowId, Set(SubmissionValidationValue(Option(AttributeString(resultVals(rowId))), None, methodConfig.inputs.keys.head))))
+      vData.validEntities should contain theSameElementsAs expectedValidInputs
       assert(vData.invalidEntities.isEmpty)
     }, withMinimalTestDatabase[Any], bigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(Right(tableResult)))
+  }
+
+  it should "create data repo submission" in {
+    val dataRepoRowIds = List.fill(3)(UUID.randomUUID().toString)
+    val resultVals = dataRepoRowIds.map(id => id -> s"resultVal $id").toMap
+    val tableResult: TableResult = prepareBqData(dataRepoRowIds, resultVals)
+
+    withDataAndService ({ workspaceService =>
+      val snapshotUUID = UUID.randomUUID()
+      val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService, snapshotUUID)
+      val submissionRq = SubmissionRequest(
+        methodConfigurationNamespace = methodConfig.namespace,
+        methodConfigurationName = methodConfig.name,
+        entityType = None,
+        entityName = None,
+        expression = None,
+        useCallCache = false,
+        deleteIntermediateOutputFiles = false
+      )
+
+      val vComplete = Await.result(workspaceService.createSubmission( minimalTestData.wsName, submissionRq ), Duration.Inf).asInstanceOf[RequestComplete[(StatusCode, SubmissionReport)]]
+      val (vStatus, resultSubmission) = vComplete.response
+      assertResult(StatusCodes.Created) {
+        vStatus
+      }
+
+      resultSubmission.header.entityStoreId shouldBe Some(snapshotUUID.toString)
+      resultSubmission.header.entityType shouldBe methodConfig.rootEntityType
+
+      val expectedValidInputs = dataRepoRowIds.map(rowId => SubmissionValidationEntityInputs(rowId, Set(SubmissionValidationValue(Option(AttributeString(resultVals(rowId))), None, methodConfig.inputs.keys.head))))
+      resultSubmission.workflows should contain theSameElementsAs expectedValidInputs
+    }, withMinimalTestDatabase[Any], bigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(Right(tableResult)))
+  }
+
+  it should "detect invalid data repo submission" in {
+    val dataRepoRowIds = List.fill(3)(UUID.randomUUID().toString)
+    val resultVals = dataRepoRowIds.map(_ -> null).toMap
+    val tableResult: TableResult = prepareBqData(dataRepoRowIds, resultVals)
+
+    withDataAndService ({ workspaceService =>
+      val methodConfig: MethodConfiguration = setupDataRepoMethodConfig(workspaceService)
+      val submissionRq = SubmissionRequest(
+        methodConfigurationNamespace = methodConfig.namespace,
+        methodConfigurationName = methodConfig.name,
+        entityType = None,
+        entityName = None,
+        expression = None,
+        useCallCache = false,
+        deleteIntermediateOutputFiles = false
+      )
+
+      val vComplete = Await.result(workspaceService.validateSubmission( minimalTestData.wsName, submissionRq ), Duration.Inf).asInstanceOf[RequestComplete[(StatusCode, SubmissionValidationReport)]]
+      val (vStatus, vData) = vComplete.response
+      assertResult(StatusCodes.OK) {
+        vStatus
+      }
+
+      assert(vData.validEntities.isEmpty)
+      val expectedInvalidInputs = dataRepoRowIds.map(rowId => SubmissionValidationEntityInputs(rowId, Set(SubmissionValidationValue(None, Some("Expected single value for workflow input, but evaluated result set was empty"), methodConfig.inputs.keys.head))))
+      vData.invalidEntities should contain theSameElementsAs expectedInvalidInputs
+    }, withMinimalTestDatabase[Any], bigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(Right(tableResult)))
+  }
+
+  private def prepareBqData(dataRepoRowIds: Seq[String], columnValueByRowId: Map[String, String]) = {
+    val rowIdField = Field.of("datarepo_row_id", LegacySQLTypeName.STRING)
+    val valueField = Field.of("value", LegacySQLTypeName.STRING)
+    val schema: Schema = Schema.of(rowIdField, valueField)
+
+    val results = dataRepoRowIds map { rowId =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, rowId),
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, columnValueByRowId(rowId))).asJava,
+        rowIdField, valueField)
+    }
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, 1, page)
+    tableResult
   }
 
   it should "report error when data reference exists with entity name" in withDataAndService ({ workspaceService =>
@@ -1167,14 +1234,13 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
     ex.errorReport.message shouldBe "Validation errors: Invalid inputs: three_step.cgrep.pattern -> Root entity type [unknown] is not a name of a table that exist within DataRepo Snapshot."
   }, withMinimalTestDatabase[Any])
 
-  private def setupDataRepoMethodConfig(workspaceService: WorkspaceService) = {
-    val snapshotUUID = UUID.randomUUID()
+  private def setupDataRepoMethodConfig(workspaceService: WorkspaceService, snapshotUUID: UUID = UUID.randomUUID()) = {
     val tableName = "table1"
     val columnName = "value"
 
     when(dataRepoDAO.getSnapshot(snapshotUUID, userInfo.accessToken)).thenReturn(createSnapshotModel(List(
       new TableModel().name(tableName).primaryKey(null).rowCount(0)
-        .columns(List(columnName).map(new ColumnModel().name(_)).asJava)))
+        .columns(List(columnName).map(new ColumnModel().name(_)).asJava))).id(snapshotUUID.toString)
     )
 
     when(dataRepoDAO.getInstanceName).thenReturn("dataRepoInstance")
