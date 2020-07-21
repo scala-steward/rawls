@@ -4,7 +4,8 @@ import bio.terra.datarepo.model.{ColumnModel, TableModel}
 import com.google.cloud.PageImpl
 import com.google.cloud.bigquery._
 import cromwell.client.model.{ToolInputParameter, ValueType}
-import org.broadinstitute.dsde.rawls.TestExecutionContext
+import org.broadinstitute.dsde.rawls.{RawlsExceptionWithErrorReport, TestExecutionContext}
+import org.broadinstitute.dsde.rawls.config.DataRepoEntityProviderConfig
 import org.broadinstitute.dsde.rawls.dataaccess.MockBigQueryServiceFactory
 import org.broadinstitute.dsde.rawls.dataaccess.MockBigQueryServiceFactory._
 import org.broadinstitute.dsde.rawls.dataaccess.slick.TestDriverComponent
@@ -15,6 +16,8 @@ import org.broadinstitute.dsde.rawls.model.{AttributeBoolean, AttributeName, Att
 import org.scalatest.{AsyncFlatSpec, Matchers}
 
 import scala.collection.JavaConverters._
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 import scala.util.Success
 
 class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProviderSpecSupport with TestDriverComponent with Matchers {
@@ -37,7 +40,7 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
       // this is the default expected value, should it move to the support trait?
       val expected = Map(
         ("table1", EntityTypeMetadata(0, "datarepo_row_id", Seq())),
-        ("table2", EntityTypeMetadata(123, "table2PK", Seq("col2.1", "col2.2"))),
+        ("table2", EntityTypeMetadata(123, "table2PK", Seq("col2a", "col2b"))),
         ("table3", EntityTypeMetadata(456, "datarepo_row_id", Seq("col3.1", "col3.2"))))
       assertResult(expected) { metadata }
     }
@@ -210,6 +213,58 @@ class DataRepoEntityProviderSpec extends AsyncFlatSpec with DataRepoEntityProvid
       })
       submissionValidationEntityInputs should contain theSameElementsAs expectedResults
     }
+  }
+
+  val table2Result = {
+    val table2RowCount = 123
+    val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+
+    val stringKeys = List.tabulate(table2RowCount)(i => "Row" + i)
+
+    val results = stringKeys map { stringKey  =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
+        FV_INTEGER, FV_BOOLEAN, FV_TIMESTAMP).asJava,
+        F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+    }
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, table2RowCount, page)
+    tableResult
+  }
+
+  it should "fail if the query results in more rows than are allowed by config" in {
+    val smallMaxRowsPerQuery = 100
+    val table2RowCount = 123
+
+    val provider = createTestProvider(bqFactory = MockBigQueryServiceFactory.ioFactory(Right(table2Result)), config = DataRepoEntityProviderConfig(maxInputsPerSubmission, smallMaxRowsPerQuery))
+    val expressionEvaluationContext = ExpressionEvaluationContext(None, None, None, Some("table2"))
+
+    val gatherInputsResult = GatherInputsResult(Set(
+      MethodInput(new ToolInputParameter().name("col2a").valueType(new ValueType().typeName(ValueType.TypeNameEnum.INT)), "this.col2a"),
+      MethodInput(new ToolInputParameter().name("col2b").valueType(new ValueType().typeName(ValueType.TypeNameEnum.BOOLEAN)), "this.col2b"),
+    ), Set.empty, Set.empty, Set.empty)
+
+    intercept[RawlsExceptionWithErrorReport] {
+      Await.result(provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult, Map("workspace.string" -> Success(List(AttributeString("workspaceValue"))))), Duration.Inf)
+    }.errorReport.message should be(s"Too many results. Results size ${table2RowCount} cannot exceed ${smallMaxRowsPerQuery}. Expression(s): [this.col2a, this.col2b].")
+  }
+
+
+  it should "fail if the submission has more inputs than are allowed by config" in {
+    val smallMaxInputsPerSubmission = 200
+
+    val provider = createTestProvider(bqFactory = MockBigQueryServiceFactory.ioFactory(Right(table2Result)), config = DataRepoEntityProviderConfig(smallMaxInputsPerSubmission, maxRowsPerQuery))
+    val expressionEvaluationContext = ExpressionEvaluationContext(None, None, None, Some("table2"))
+
+    val gatherInputsResult = GatherInputsResult(Set(
+      MethodInput(new ToolInputParameter().name("col2a").valueType(new ValueType().typeName(ValueType.TypeNameEnum.INT)), "this.col2a"),
+      MethodInput(new ToolInputParameter().name("col2b").valueType(new ValueType().typeName(ValueType.TypeNameEnum.BOOLEAN)), "this.col2b"),
+    ), Set.empty, Set.empty, Set.empty)
+
+    intercept[RawlsExceptionWithErrorReport] {
+      Await.result(provider.evaluateExpressions(expressionEvaluationContext, gatherInputsResult, Map("workspace.string" -> Success(List(AttributeString("workspaceValue"))))), Duration.Inf)
+    }.errorReport.message should be(s"Too many results. Snapshot row count * number of entity expressions cannot exceed ${smallMaxInputsPerSubmission}.")
   }
 
 
