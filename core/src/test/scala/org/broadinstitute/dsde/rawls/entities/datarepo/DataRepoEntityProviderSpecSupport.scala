@@ -29,12 +29,14 @@ trait DataRepoEntityProviderSpecSupport {
   val refId: UUID = UUID.randomUUID()
   val dataRepoInstanceName: String = "mock-instance-name"
   val snapshot: String = UUID.randomUUID().toString
-  val maxInputsPerSubmission: Int = 1000
-  val maxRowsPerQuery: Int = 500
 
   // default Workspace object, mostly irrelevant for DataRepoEntityProviderSpec but necessary to exist
   val workspace = new Workspace("namespace", "name", wsId.toString, "bucketName", None,
     DateTime.now(), DateTime.now(), "createdBy", Map.empty, false)
+
+  // defaults for DataRepoEntityProviderConfig
+  val maxInputsPerSubmission: Int = 1000
+  val maxRowsPerQuery: Int = 500
 
   /* A "factory" method to create a DataRepoEntityProvider, with defaults.
    * Individual unit tests should call this to reduce boilerplate.
