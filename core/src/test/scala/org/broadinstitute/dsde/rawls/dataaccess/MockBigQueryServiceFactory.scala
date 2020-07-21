@@ -22,32 +22,53 @@ import scala.concurrent.ExecutionContext
  */
 
 object MockBigQueryServiceFactory {
-
-  // default fixture data returned by the underlying MockGoogleBigQueryService, unless a caller overrides it
-  val F_INTEGER = Field.of("integer-field", LegacySQLTypeName.INTEGER)
-  val F_BOOLEAN = Field.of("boolean-field", LegacySQLTypeName.BOOLEAN)
-  val F_STRING = Field.of("datarepo_row_id", LegacySQLTypeName.STRING)
-  val F_TIMESTAMP = Field.of("timestamp-field", LegacySQLTypeName.TIMESTAMP)
+  val F_INTEGER = Field.of("root.integer-field", LegacySQLTypeName.INTEGER)
+  val F_BOOLEAN = Field.of("root.boolean-field", LegacySQLTypeName.BOOLEAN)
+  val F_STRING = Field.of("root.datarepo_row_id", LegacySQLTypeName.STRING)
+  val F_TIMESTAMP = Field.of("root.timestamp-field", LegacySQLTypeName.TIMESTAMP)
 
   val FV_INTEGER = FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, "42")
   val FV_BOOLEAN = FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, "true")
   val FV_TIMESTAMP = FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, "1408452095.22")
 
-  val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
 
-  val stringKeys = List("the first row", "the second row", "the third row")
+  val table1Result = {
+    // default fixture data returned by the underlying MockGoogleBigQueryService, unless a caller overrides it
+    val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
 
-  val results = stringKeys map { stringKey  =>
-    FieldValueList.of(List(
-      FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
-      FV_INTEGER, FV_BOOLEAN, FV_TIMESTAMP).asJava,
-      F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+    val stringKeys = List("the first row", "the second row", "the third row")
+
+    val results = stringKeys map { stringKey  =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
+        FV_INTEGER, FV_BOOLEAN, FV_TIMESTAMP).asJava,
+        F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+    }
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, 3, page)
+    tableResult
   }
 
-  val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
-  val tableResult: TableResult = new TableResult(schema, 3, page)
+  val table2Result = {
+    val table2RowCount = 123
+    val schema: Schema = Schema.of(F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
 
-  def ioFactory(queryResponse: Either[Throwable, TableResult] = Right(tableResult)): MockBigQueryServiceFactory = {
+    val stringKeys = List.tabulate(table2RowCount)(i => "Row" + i)
+
+    val results = stringKeys map { stringKey  =>
+      FieldValueList.of(List(
+        FieldValue.of(com.google.cloud.bigquery.FieldValue.Attribute.PRIMITIVE, stringKey),
+        FV_INTEGER, FV_BOOLEAN, FV_TIMESTAMP).asJava,
+        F_STRING, F_INTEGER, F_BOOLEAN, F_TIMESTAMP)
+    }
+
+    val page: PageImpl[FieldValueList] = new PageImpl[FieldValueList](null, null, results.asJava)
+    val tableResult: TableResult = new TableResult(schema, table2RowCount, page)
+    tableResult
+  }
+
+  def ioFactory(queryResponse: Either[Throwable, TableResult] = Right(table1Result)): MockBigQueryServiceFactory = {
     lazy val blocker = Blocker.liftExecutionContext(TestExecutionContext.testExecutionContext)
     implicit val ec = TestExecutionContext.testExecutionContext
 

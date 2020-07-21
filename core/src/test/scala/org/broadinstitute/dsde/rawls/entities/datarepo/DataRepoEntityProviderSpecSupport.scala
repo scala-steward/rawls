@@ -29,6 +29,8 @@ trait DataRepoEntityProviderSpecSupport {
   val refId: UUID = UUID.randomUUID()
   val dataRepoInstanceName: String = "mock-instance-name"
   val snapshot: String = UUID.randomUUID().toString
+  val maxInputsPerSubmission: Int = 1000
+  val maxRowsPerQuery: Int = 500
 
   // default Workspace object, mostly irrelevant for DataRepoEntityProviderSpec but necessary to exist
   val workspace = new Workspace("namespace", "name", wsId.toString, "bucketName", None,
@@ -40,16 +42,17 @@ trait DataRepoEntityProviderSpecSupport {
   def createTestProvider(snapshotModel: SnapshotModel = createSnapshotModel(),
                          samDAO: SamDAO = new MockSamDAO(slickDataSource),
                          bqFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(),
-                         entityRequestArguments: EntityRequestArguments = EntityRequestArguments(workspace, userInfo, Some(DataReferenceName("referenceName")))
+                         entityRequestArguments: EntityRequestArguments = EntityRequestArguments(workspace, userInfo, Some(DataReferenceName("referenceName"))),
+                         config: DataRepoEntityProviderConfig = DataRepoEntityProviderConfig(maxInputsPerSubmission, maxRowsPerQuery)
                         ): DataRepoEntityProvider = {
-    new DataRepoEntityProvider(snapshotModel, entityRequestArguments, samDAO, bqFactory, DataRepoEntityProviderConfig(100, 10))
+    new DataRepoEntityProvider(snapshotModel, entityRequestArguments, samDAO, bqFactory, config)
   }
 
   def createTestBuilder(workspaceManagerDAO: WorkspaceManagerDAO = new SpecWorkspaceManagerDAO(Right(createDataRefDescription())),
                         dataRepoDAO: SpecDataRepoDAO = new SpecDataRepoDAO(Right(createSnapshotModel())),
                         samDAO: SamDAO = new MockSamDAO(slickDataSource),
                         bqServiceFactory: GoogleBigQueryServiceFactory = MockBigQueryServiceFactory.ioFactory(),
-                        config: DataRepoEntityProviderConfig = DataRepoEntityProviderConfig(100, 10)
+                        config: DataRepoEntityProviderConfig = DataRepoEntityProviderConfig(maxInputsPerSubmission, maxRowsPerQuery)
                        ): DataRepoEntityProviderBuilder = {
     new DataRepoEntityProviderBuilder(workspaceManagerDAO, dataRepoDAO, samDAO, bqServiceFactory, config)
   }
@@ -84,12 +87,15 @@ trait DataRepoEntityProviderSpecSupport {
       .workspaceId(workspaceId)
   }
 
+  val table2RowCount = 123
+  val table3RowCount = 456
+
   val defaultTables: List[TableModel] = List(
     new TableModel().name("table1").primaryKey(null).rowCount(0)
       .columns(List().map(new ColumnModel().name(_)).asJava),
-    new TableModel().name("table2").primaryKey(List("table2PK").asJava).rowCount(123)
-      .columns(List("col2.1", "col2.2").map(new ColumnModel().name(_)).asJava),
-    new TableModel().name("table3").primaryKey(List("compound","pk").asJava).rowCount(456)
+    new TableModel().name("table2").primaryKey(List("table2PK").asJava).rowCount(table2RowCount)
+      .columns(List("col2a", "col2b").map(new ColumnModel().name(_)).asJava),
+    new TableModel().name("table3").primaryKey(List("compound","pk").asJava).rowCount(table3RowCount)
       .columns(List("col3.1", "col3.2").map(new ColumnModel().name(_)).asJava)
   )
 
