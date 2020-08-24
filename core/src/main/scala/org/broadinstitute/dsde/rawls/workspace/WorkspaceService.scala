@@ -26,7 +26,7 @@ import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver
 import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.GatherInputsResult
 import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.AttributeUpdateOperations._
-import org.broadinstitute.dsde.rawls.model.ExecutionJsonSupport.{SubmissionFormat, ActiveSubmissionFormat, SubmissionListResponseFormat, SubmissionReportFormat, SubmissionValidationReportFormat, WorkflowCostFormat, WorkflowOutputsFormat, WorkflowQueueStatusByUserResponseFormat, WorkflowQueueStatusResponseFormat}
+import org.broadinstitute.dsde.rawls.model.ExecutionJsonSupport.{ActiveSubmissionFormat, SubmissionFormat, SubmissionListResponseFormat, SubmissionReportFormat, SubmissionValidationReportFormat, WorkflowCostFormat, WorkflowOutputsFormat, WorkflowQueueStatusByUserResponseFormat, WorkflowQueueStatusResponseFormat}
 import org.broadinstitute.dsde.rawls.model.MethodRepoJsonSupport.AgoraEntityFormat
 import org.broadinstitute.dsde.rawls.model.WorkflowFailureModes.WorkflowFailureMode
 import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.WorkflowStatus
@@ -1366,7 +1366,23 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
   // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
-    dataSource.inTransaction { dataAccess =>
+
+    println("FINDME: version 0.0.2")
+
+    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
+
+    for {
+//      petSAJson <- samDAO.getPetServiceAccountKeyForUser(workspaceContext.namespace, userInfo.userEmail)
+//      petUserInfo <- gcsDAO.getUserInfoUsingJson(petSAJson)
+      proxyGroupEmail <- samDAO.getProxyGroup(userInfo, WorkbenchEmail(userInfo.userEmail.value))
+      // TODO: Is this adding the role at the project / organization level? Below I think we're adding it at the dataset level...
+      //_ <- gcsDAO.addRoleToGroup(RawlsBillingProjectName(workspaceContext.namespace), proxyGroupEmail, bqPolicy)
+      _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(
+        RawlsBillingProjectName(workspaceContext.namespace),
+        RawlsGroupEmail(proxyGroupEmail.value),
+      )
+
+    result <- dataSource.inTransaction { dataAccess =>
       val submissionId: UUID = UUID.randomUUID()
       val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
       val workflows = successes map { entityInputs =>
@@ -1421,6 +1437,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
       dataAccess.submissionQuery.create(workspaceContext, submission)
     }
+    } yield result
   }
 
   def validateSubmission(workspaceName: WorkspaceName, submissionRequest: SubmissionRequest): Future[PerRequestMessage] = {

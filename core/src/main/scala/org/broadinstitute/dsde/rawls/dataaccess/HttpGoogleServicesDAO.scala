@@ -3,6 +3,7 @@ package org.broadinstitute.dsde.rawls.dataaccess
 import java.io._
 import java.util.UUID
 
+import _root_.io.chrisdavenport.log4cats.slf4j.Slf4jLogger
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding
@@ -10,25 +11,31 @@ import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
 import akka.http.scaladsl.model.{StatusCode, StatusCodes}
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.Materializer
-import cats.effect.{ContextShift, IO, Timer}
 import cats.data.NonEmptyList
-import cats.syntax.functor._
+import cats.effect.{ContextShift, IO, Timer}
 import cats.instances.future._
+import cats.syntax.functor._
 import com.google.api.client.auth.oauth2.{Credential, TokenResponse}
 import com.google.api.client.googleapis.auth.oauth2.{GoogleClientSecrets, GoogleCredential}
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
-import com.google.api.client.http.{HttpResponseException, InputStreamContent}
+import com.google.api.client.http.{HttpResponseException, HttpStatusCodes, InputStreamContent}
 import com.google.api.client.json.jackson2.JacksonFactory
 import com.google.api.services.admin.directory.model._
 import com.google.api.services.admin.directory.{Directory, DirectoryScopes}
+import com.google.api.services.bigquery.model._
+import com.google.api.services.bigquery.{Bigquery, BigqueryScopes}
 import com.google.api.services.cloudbilling.Cloudbilling
 import com.google.api.services.cloudbilling.model.{BillingAccount, ProjectBillingInfo, TestIamPermissionsRequest}
 import com.google.api.services.cloudresourcemanager.CloudResourceManager
 import com.google.api.services.cloudresourcemanager.model._
 import com.google.api.services.compute.{Compute, ComputeScopes}
-import com.google.api.services.deploymentmanager.model.{ConfigFile, Deployment, TargetConfiguration}
 import com.google.api.services.deploymentmanager.DeploymentManagerV2Beta
+import com.google.api.services.deploymentmanager.model.{ConfigFile, Deployment, TargetConfiguration}
+import com.google.api.services.genomics.v2alpha1.{Genomics, GenomicsScopes}
+import com.google.api.services.iam.v1.Iam
+import com.google.api.services.iamcredentials.v1.IAMCredentials
+import com.google.api.services.iamcredentials.v1.model.GenerateAccessTokenRequest
 import com.google.api.services.oauth2.Oauth2.Builder
 import com.google.api.services.plus.PlusScopes
 import com.google.api.services.servicemanagement.ServiceManagement
@@ -38,8 +45,12 @@ import com.google.api.services.storage.model._
 import com.google.api.services.storage.{Storage, StorageScopes}
 import com.google.auth.oauth2.ServiceAccountCredentials
 import com.google.cloud.Identity
+import com.google.cloud.bigquery.StandardSQLTypeName
 import fs2.Stream
+import io.opencensus.scala.Tracing._
+import io.opencensus.trace.Span
 import org.broadinstitute.dsde.rawls.crypto.{Aes256Cbc, EncryptedBytes, SecretKey}
+import org.broadinstitute.dsde.rawls.dataaccess.CloudResourceManagerV2Model.{Folder, FolderSearchResponse}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.RawlsBillingProjectOperationRecord
 import org.broadinstitute.dsde.rawls.google.{AccessContextManagerDAO, GoogleUtilities}
 import org.broadinstitute.dsde.rawls.metrics.GoogleInstrumentedService
@@ -49,25 +60,16 @@ import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.util.{FutureSupport, HttpClientUtilsStandard}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.workbench.google2._
+import org.broadinstitute.dsde.workbench.google2.util.RetryPredicates
 import org.broadinstitute.dsde.workbench.model.google.{GcsBucketName, GoogleProject, GoogleResourceTypes}
 import org.broadinstitute.dsde.workbench.model.{TraceId, WorkbenchEmail}
 import org.joda.time
 import spray.json._
-import _root_.io.chrisdavenport.log4cats.slf4j.Slf4jLogger
-import com.google.api.services.genomics.v2alpha1.{Genomics, GenomicsScopes}
-import com.google.api.services.iam.v1.Iam
-import com.google.api.services.iamcredentials.v1.IAMCredentials
-import com.google.api.services.iamcredentials.v1.model.GenerateAccessTokenRequest
-import io.opencensus.trace.Span
-import org.broadinstitute.dsde.rawls.dataaccess.CloudResourceManagerV2Model.{Folder, FolderSearchResponse}
-import org.broadinstitute.dsde.workbench.google2.util.RetryPredicates
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{Future, _}
 import scala.io.Source
 import scala.util.matching.Regex
-
-import io.opencensus.scala.Tracing._
 
 case class Resources (
                        name: String,
@@ -807,9 +809,9 @@ class HttpGoogleServicesDAO(
     val credential = getDeploymentManagerAccountCredential
     val deploymentManager = getDeploymentManager(credential)
 
-    import spray.json._
-    import spray.json.DefaultJsonProtocol._
     import DeploymentManagerJsonSupport._
+    import spray.json.DefaultJsonProtocol._
+    import spray.json._
 
     val templateLabels = parseTemplateLocation(dmTemplatePath).map(_.toJson).getOrElse(Map("template_path" -> labelSafeString(dmTemplatePath)).toJson)
 
@@ -1020,6 +1022,12 @@ class HttpGoogleServicesDAO(
     new Directory.Builder(httpTransport, jsonFactory, getGroupServiceAccountCredential).setApplicationName(appName).build()
   }
 
+  def getBigquery: Bigquery = {
+    new Bigquery.Builder(httpTransport, jsonFactory, getBigqueryServiceAccountCredential)
+      .setApplicationName(appName)
+      .build()
+  }
+
   private def getUserCredential(userInfo: UserInfo): Credential = {
     new GoogleCredential().setAccessToken(userInfo.accessToken.token).setExpiresInSeconds(userInfo.accessTokenExpiresIn)
   }
@@ -1061,6 +1069,20 @@ class HttpGoogleServicesDAO(
       .setJsonFactory(jsonFactory)
       .setServiceAccountId(clientEmail)
       .setServiceAccountScopes(Seq(ComputeScopes.CLOUD_PLATFORM).asJavaCollection)
+      .setServiceAccountPrivateKeyFromPemFile(new java.io.File(pemFile))
+      .build()
+  }
+
+  private def getBigqueryServiceAccountCredential: Credential = {
+    getClientCredential(BigqueryScopes.BIGQUERY)
+  }
+
+  private def getClientCredential(scopes: String*): Credential = {
+    new GoogleCredential.Builder()
+      .setTransport(httpTransport)
+      .setJsonFactory(jsonFactory)
+      .setServiceAccountId(clientEmail)
+      .setServiceAccountScopes(scopes.asJavaCollection)
       .setServiceAccountPrivateKeyFromPemFile(new java.io.File(pemFile))
       .build()
   }
@@ -1169,6 +1191,84 @@ class HttpGoogleServicesDAO(
       new CloudResourceManagerV2DAO().getFolderId(folderName, OAuth2BearerToken(credential.getAccessToken))
     })
   }
+
+  override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
+                                                   groupEmail: RawlsGroupEmail,
+                                                  ): Future[Unit] = {
+    implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
+    val credential = getBigqueryServiceAccountCredential
+    credential.refreshToken()
+
+    val datasetId = "cromwell_metrics"
+
+    val perWorkspaceSchema = new TableSchema()
+    perWorkspaceSchema.setFields(List(
+      new TableFieldSchema().setName("workspace_name").setType(StandardSQLTypeName.STRING.toString),
+      new TableFieldSchema().setName("schema_version_major").setType(StandardSQLTypeName.INT64.toString),
+      new TableFieldSchema().setName("schema_version_minor").setType(StandardSQLTypeName.INT64.toString),
+      new TableFieldSchema().setName("schema_version_patch").setType(StandardSQLTypeName.INT64.toString),
+    ).asJava)
+
+    val perWorkspaceTable = new Table()
+    perWorkspaceTable.setTableReference(
+      new TableReference()
+        .setProjectId(projectName.value)
+        .setDatasetId(datasetId)
+        .setTableId("per_workspace")
+    )
+    perWorkspaceTable.setSchema(perWorkspaceSchema)
+
+    // TODO: create other tables
+    // TODO: set permissions on the dataset creation for the pet-service-account
+    // https://cloud.google.com/bigquery/docs/access-control#bq-permissions
+//    val perJobTable = new Table()
+//    val perMetricsTable = new Table()
+
+    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
+    val dataset = new Dataset()
+      .setDatasetReference(new DatasetReference().setDatasetId(datasetId))
+      .setAccess(
+        List(
+          new Dataset.Access()
+            .setGroupByEmail(groupEmail.value)
+            .setRole(bqPolicy)
+        ).asJava
+      )
+
+    val bq = getBigquery
+    retryWhen500orGoogleError( () => {
+      try {
+        executeGoogleRequest(bq.datasets().insert(
+          projectName.value,
+          dataset,
+        ))
+      } catch {
+        case exception: GoogleJsonResponseException
+          if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
+          executeGoogleRequest(bq.datasets().patch(
+            projectName.value,
+            dataset.getDatasetReference.getDatasetId,
+            dataset,
+          ))
+        /* ignore */
+      }
+
+      try {
+        executeGoogleRequest(
+          bq.tables().insert(
+            projectName.value,
+            datasetId,
+            perWorkspaceTable,
+          )
+        )
+      } catch {
+        case exception: GoogleJsonResponseException
+          if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
+        /* ignore */
+      }
+    })
+  }
+
 }
 
 class GoogleStorageLogException(message: String) extends RawlsException(message)
@@ -1178,8 +1278,8 @@ class GenomicsV1DAO(implicit val system: ActorSystem, val materializer: Material
   val httpClientUtils = HttpClientUtilsStandard()
 
   def getOperation(opId: String, accessToken: OAuth2BearerToken): Future[Option[JsObject]] = {
-    import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
     import DefaultJsonProtocol._
+    import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
     executeRequestWithToken[Option[JsObject]](accessToken)(RequestBuilding.Get(s"https://genomics.googleapis.com/v1alpha2/$opId"))
   }
 }
@@ -1198,8 +1298,8 @@ class CloudResourceManagerV2DAO(implicit val system: ActorSystem, val materializ
   val httpClientUtils = HttpClientUtilsStandard()
 
   def getFolderId(folderName: String, accessToken: OAuth2BearerToken): Future[Option[String]] = {
-    import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
     import DefaultJsonProtocol._
+    import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 
     implicit val FolderFormat = jsonFormat1(Folder)
     implicit val FolderSearchResponseFormat = jsonFormat1(FolderSearchResponse)
