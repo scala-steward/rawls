@@ -53,6 +53,7 @@ import org.broadinstitute.dsde.rawls.crypto.{Aes256Cbc, EncryptedBytes, SecretKe
 import org.broadinstitute.dsde.rawls.dataaccess.CloudResourceManagerV2Model.{Folder, FolderSearchResponse}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.RawlsBillingProjectOperationRecord
 import org.broadinstitute.dsde.rawls.google.{AccessContextManagerDAO, GoogleUtilities}
+import org.broadinstitute.dsde.rawls.metrics.GoogleInstrumented.GoogleCounters
 import org.broadinstitute.dsde.rawls.metrics.GoogleInstrumentedService
 import org.broadinstitute.dsde.rawls.model.UserAuthJsonSupport._
 import org.broadinstitute.dsde.rawls.model.WorkspaceAccessLevels._
@@ -88,6 +89,7 @@ case class TemplateLocation(
                              template_path: String
                            )
 
+//noinspection TypeAnnotation
 object DeploymentManagerJsonSupport {
   import spray.json.DefaultJsonProtocol._
   implicit val resourceJsonFormat = jsonFormat3(Resources)
@@ -95,6 +97,7 @@ object DeploymentManagerJsonSupport {
   implicit val templateLocationJsonFormat = jsonFormat4(TemplateLocation)
 }
 
+//noinspection TypeAnnotation,ScalaDeprecation,RedundantBlock,NameBooleanParameters,JavaAccessorEmptyParenCall,DuplicatedCode,ScalaUnusedSymbol,ScalaDocMissingParameterDescription,ScalaUnnecessaryParentheses
 class HttpGoogleServicesDAO(
   useServiceAccountForBuckets: Boolean,
   val clientSecrets: GoogleClientSecrets,
@@ -700,10 +703,10 @@ class HttpGoogleServicesDAO(
   }
 
   override def revokeToken(rawlsUserRef: RawlsUserRef): Future[Unit] = {
-    getToken(rawlsUserRef) map {
+    getToken(rawlsUserRef) flatMap {
       case Some(token) =>
         val url = s"https://accounts.google.com/o/oauth2/revoke?token=$token"
-        Http(system).singleRequest(RequestBuilding.Get(url))
+        Http(system).singleRequest(RequestBuilding.Get(url)).map(_ => ())
 
       case None => Future.successful(())
     }
@@ -796,6 +799,7 @@ class HttpGoogleServicesDAO(
   def parseTemplateLocation(path: String): Option[TemplateLocation] = {
     val rx: Regex = "https://raw.githubusercontent.com/(.*)/(.*)/(.*)/(.*)".r
     rx.findAllMatchIn(path).toList.headOption map { groups =>
+      //noinspection ZeroIndexToHead
       TemplateLocation(
         labelSafeString(groups.subgroups(0), ""),
         labelSafeString(groups.subgroups(1), ""),
@@ -1201,78 +1205,132 @@ class HttpGoogleServicesDAO(
 
     val datasetId = "cromwell_metrics"
 
-    val perWorkspaceSchema = new TableSchema()
-    perWorkspaceSchema.setFields(List(
-      new TableFieldSchema().setName("workspace_name").setType(StandardSQLTypeName.STRING.toString),
-      new TableFieldSchema().setName("schema_version_major").setType(StandardSQLTypeName.INT64.toString),
-      new TableFieldSchema().setName("schema_version_minor").setType(StandardSQLTypeName.INT64.toString),
-      new TableFieldSchema().setName("schema_version_patch").setType(StandardSQLTypeName.INT64.toString),
-    ).asJava)
-
-    val perWorkspaceTable = new Table()
-    perWorkspaceTable.setTableReference(
-      new TableReference()
-        .setProjectId(projectName.value)
-        .setDatasetId(datasetId)
-        .setTableId("per_workspace")
-    )
-    perWorkspaceTable.setSchema(perWorkspaceSchema)
-
-    // TODO: create other tables
     // TODO: set permissions on the dataset creation for the pet-service-account
     // https://cloud.google.com/bigquery/docs/access-control#bq-permissions
-//    val perJobTable = new Table()
-//    val perMetricsTable = new Table()
 
-    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
+//    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
     val dataset = new Dataset()
-      .setDatasetReference(new DatasetReference().setDatasetId(datasetId))
-      .setAccess(
-        List(
-          new Dataset.Access()
-            .setGroupByEmail(groupEmail.value)
-            .setRole(bqPolicy)
-        ).asJava
+      .setDatasetReference(
+        new DatasetReference()
+          .setProjectId(projectName.value)
+          .setDatasetId(datasetId)
       )
+//      .setAccess(
+//        List(
+//          new Dataset.Access()
+//            .setGroupByEmail(groupEmail.value)
+//            .setRole(bqPolicy)
+//        ).asJava
+//      )
 
-    val bq = getBigquery
+    val perWorkspaceTable = newTable(
+      dataset = dataset,
+      name = "per_workspace",
+      columns = Map(
+        "workspace_name" -> StandardSQLTypeName.STRING,
+        "google_project" -> StandardSQLTypeName.STRING,
+        "schema_version_major" -> StandardSQLTypeName.INT64,
+        "schema_version_minor" -> StandardSQLTypeName.INT64,
+        "schema_version_patch" -> StandardSQLTypeName.INT64,
+      )
+    )
+    val perJobTable = newTable(
+      dataset = dataset,
+      name = "per_job",
+      columns = Map(
+        "per_job_id" -> StandardSQLTypeName.STRING,
+        "workspace_name" -> StandardSQLTypeName.STRING,
+        "submission_id" -> StandardSQLTypeName.STRING,
+        "workflow_id" -> StandardSQLTypeName.STRING,
+        "call_name" -> StandardSQLTypeName.STRING,
+        "call_attempt" -> StandardSQLTypeName.INT64,
+        "call_shard" -> StandardSQLTypeName.INT64,
+        "total_cpus_pct" -> StandardSQLTypeName.INT64,
+        "total_mem" -> StandardSQLTypeName.INT64,
+        "total_disk" -> StandardSQLTypeName.INT64,
+      )
+    )
+    val perMetricTable = newTable(
+      dataset = dataset,
+      name = "per_metric",
+      columns = Map(
+        "per_job_id" -> StandardSQLTypeName.STRING,
+        "timestamp" -> StandardSQLTypeName.TIMESTAMP,
+        "current_cpu_pct" -> StandardSQLTypeName.INT64,
+        "current_mem" -> StandardSQLTypeName.INT64,
+        "current_disk" -> StandardSQLTypeName.INT64,
+      )
+    )
+
+    val bq: Bigquery = getBigquery
     retryWhen500orGoogleError( () => {
       try {
         executeGoogleRequest(bq.datasets().insert(
-          projectName.value,
+          dataset.getDatasetReference.getProjectId,
           dataset,
         ))
       } catch {
         case exception: GoogleJsonResponseException
           if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
           executeGoogleRequest(bq.datasets().patch(
-            projectName.value,
+            dataset.getDatasetReference.getProjectId,
             dataset.getDatasetReference.getDatasetId,
             dataset,
           ))
-        /* ignore */
       }
 
-      try {
-        executeGoogleRequest(
-          bq.tables().insert(
-            projectName.value,
-            datasetId,
-            perWorkspaceTable,
-          )
-        )
-      } catch {
-        case exception: GoogleJsonResponseException
-          if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
-        /* ignore */
-      }
+      upsertTable(bq, perWorkspaceTable)
+      upsertTable(bq, perJobTable)
+      upsertTable(bq, perMetricTable)
     })
   }
 
+  private def newTable(dataset: Dataset, name: String, columns: Map[String, StandardSQLTypeName]): Table = {
+    val schema = new TableSchema()
+    schema.setFields(
+      columns.toList.map {
+        case (name, columnType) => new TableFieldSchema().setName(name).setType(columnType.toString)
+      }.asJava
+    )
+
+    val table = new Table()
+    table.setTableReference(
+      new TableReference()
+        .setProjectId(dataset.getDatasetReference.getProjectId)
+        .setDatasetId(dataset.getDatasetReference.getDatasetId)
+        .setTableId(name)
+    )
+    table.setSchema(schema)
+    table
+  }
+
+  private def upsertTable(bq: Bigquery, table: Table)(implicit counters: GoogleCounters): Table = {
+    try {
+      executeGoogleRequest(
+        bq.tables().insert(
+          table.getTableReference.getProjectId,
+          table.getTableReference.getDatasetId,
+          table,
+        )
+      )
+    } catch {
+      case exception: GoogleJsonResponseException
+        if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
+        executeGoogleRequest(
+          bq.tables().patch(
+            table.getTableReference.getProjectId,
+            table.getTableReference.getDatasetId,
+            table.getTableReference.getTableId,
+            table,
+          )
+        )
+    }
+  }
 }
 
 class GoogleStorageLogException(message: String) extends RawlsException(message)
 
+//noinspection TypeAnnotation
 class GenomicsV1DAO(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext) extends DsdeHttpDAO {
   val http = Http(system)
   val httpClientUtils = HttpClientUtilsStandard()
@@ -1293,6 +1351,7 @@ class GenomicsV1DAO(implicit val system: ActorSystem, val materializer: Material
   * @param materializer
   * @param executionContext
   */
+//noinspection TypeAnnotation,ScalaDocMissingParameterDescription
 class CloudResourceManagerV2DAO(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext) extends DsdeHttpDAO {
   val http = Http(system)
   val httpClientUtils = HttpClientUtilsStandard()
