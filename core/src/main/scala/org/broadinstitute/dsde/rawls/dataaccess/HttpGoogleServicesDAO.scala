@@ -1197,7 +1197,7 @@ class HttpGoogleServicesDAO(
   }
 
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
-                                                   groupEmail: RawlsGroupEmail,
+                                                   userProxygroupEmail: RawlsGroupEmail,
                                                   ): Future[Unit] = {
     implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
     val credential = getBigqueryServiceAccountCredential
@@ -1208,20 +1208,20 @@ class HttpGoogleServicesDAO(
     // TODO: set permissions on the dataset creation for the pet-service-account
     // https://cloud.google.com/bigquery/docs/access-control#bq-permissions
 
-//    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
+    val bqPolicy = "organizations/400176686919/roles/MetricsDatasetReadWrite"
     val dataset = new Dataset()
       .setDatasetReference(
         new DatasetReference()
           .setProjectId(projectName.value)
           .setDatasetId(datasetId)
       )
-//      .setAccess(
-//        List(
-//          new Dataset.Access()
-//            .setGroupByEmail(groupEmail.value)
-//            .setRole(bqPolicy)
-//        ).asJava
-//      )
+      .setAccess(
+        List(
+          new Dataset.Access()
+            .setGroupByEmail(userProxygroupEmail.value)
+            .setRole(bqPolicy)
+        ).asJava
+      )
 
     val perWorkspaceTable = newTable(
       dataset = dataset,

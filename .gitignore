@@ -9,6 +9,7 @@ test-output/
 .classpath_nb
 .cache
 .classpath
+.java-version
 .project
 /.settings/
 /bin/

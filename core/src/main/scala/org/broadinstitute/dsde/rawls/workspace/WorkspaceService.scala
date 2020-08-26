@@ -1367,19 +1367,19 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
 
-    println("FINDME: version 0.0.3")
+    println("FINDME: version 0.0.4")
 
     val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
 
     for {
 //      petSAJson <- samDAO.getPetServiceAccountKeyForUser(workspaceContext.namespace, userInfo.userEmail)
 //      petUserInfo <- gcsDAO.getUserInfoUsingJson(petSAJson)
-      proxyGroupEmail <- samDAO.getProxyGroup(userInfo, WorkbenchEmail(userInfo.userEmail.value))
+      proxyUserEmail <- samDAO.getProxyGroup(userInfo, WorkbenchEmail(userInfo.userEmail.value))
       // TODO: Is this adding the role at the project / organization level? Below I think we're adding it at the dataset level...
       //_ <- gcsDAO.addRoleToGroup(RawlsBillingProjectName(workspaceContext.namespace), proxyGroupEmail, bqPolicy)
       _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(
         RawlsBillingProjectName(workspaceContext.namespace),
-        RawlsGroupEmail(proxyGroupEmail.value),
+        RawlsGroupEmail(proxyUserEmail.value),
       )
 
     result <- dataSource.inTransaction { dataAccess =>
