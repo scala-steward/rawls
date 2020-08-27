@@ -1272,11 +1272,23 @@ class HttpGoogleServicesDAO(
       } catch {
         case exception: GoogleJsonResponseException
           if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
-          executeGoogleRequest(bq.datasets().patch(
+          val datasetExisting = executeGoogleRequest(bq.datasets().get(
             dataset.getDatasetReference.getProjectId,
             dataset.getDatasetReference.getDatasetId,
-            dataset,
           ))
+
+          val newDataAccess = dataset.getAccess.asScala
+          val existingDataAccess = datasetExisting.getAccess.asScala
+          if (existingDataAccess.diff(newDataAccess).nonEmpty || 1.toString == "1") {
+            val patchedDataAccess = existingDataAccess ++ newDataAccess
+            datasetExisting.setAccess(patchedDataAccess.distinct.asJava)
+
+            executeGoogleRequest(bq.datasets().patch(
+              dataset.getDatasetReference.getProjectId,
+              dataset.getDatasetReference.getDatasetId,
+              datasetExisting,
+            ))
+          }
       }
 
       upsertTable(bq, perWorkspaceTable)
@@ -1304,7 +1316,7 @@ class HttpGoogleServicesDAO(
     table
   }
 
-  private def upsertTable(bq: Bigquery, table: Table)(implicit counters: GoogleCounters): Table = {
+  private def upsertTable(bq: Bigquery, table: Table)(implicit counters: GoogleCounters): Unit = {
     try {
       executeGoogleRequest(
         bq.tables().insert(
@@ -1316,14 +1328,27 @@ class HttpGoogleServicesDAO(
     } catch {
       case exception: GoogleJsonResponseException
         if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
-        executeGoogleRequest(
-          bq.tables().patch(
-            table.getTableReference.getProjectId,
-            table.getTableReference.getDatasetId,
-            table.getTableReference.getTableId,
-            table,
+
+        val tableExisting = executeGoogleRequest(bq.tables.get(
+          table.getTableReference.getProjectId,
+          table.getTableReference.getDatasetId,
+          table.getTableReference.getTableId,
+        ))
+        val newFields = table.getSchema.getFields.asScala
+        val existingFields = tableExisting.getSchema.getFields.asScala
+        if (existingFields.diff(newFields).nonEmpty || 1.toString == "1") {
+          val patchedFields = existingFields ++ newFields
+          tableExisting.setSchema(new TableSchema().setFields(patchedFields.distinct.asJava))
+
+          executeGoogleRequest(
+            bq.tables().patch(
+              table.getTableReference.getProjectId,
+              table.getTableReference.getDatasetId,
+              table.getTableReference.getTableId,
+              tableExisting,
+            )
           )
-        )
+        }
     }
   }
 }
