@@ -68,7 +68,8 @@ import org.joda.time
 import spray.json._
 
 import scala.collection.JavaConverters._
-import scala.concurrent.{Future, _}
+import scala.collection.mutable
+import scala.concurrent._
 import scala.io.Source
 import scala.util.matching.Regex
 
@@ -1205,7 +1206,8 @@ class HttpGoogleServicesDAO(
 
     val datasetId = "cromwell_metrics"
 
-    // TODO: set permissions on the dataset creation for the pet-service-account
+    // TODO: set permissions on the dataset creation for the group of workspace owners
+    // TODO: should we be able to replace the role/policy for an existing userProxygroupEmail?
     // https://cloud.google.com/bigquery/docs/access-control#bq-permissions
 
     val bqPolicy = "organizations/400176686919/roles/MetricsDatasetReadWrite"
@@ -1277,10 +1279,15 @@ class HttpGoogleServicesDAO(
             dataset.getDatasetReference.getDatasetId,
           ))
 
-          val newDataAccess = dataset.getAccess.asScala
           val existingDataAccess = datasetExisting.getAccess.asScala
-          if (existingDataAccess.diff(newDataAccess).nonEmpty || 1.toString == "1") {
-            val patchedDataAccess = existingDataAccess ++ newDataAccess
+          val newDataAccess = dataset.getAccess.asScala
+          val appendedDataAccess = findNewUniqueByName[Dataset.Access](
+            existingDataAccess,
+            newDataAccess,
+            _.getGroupByEmail,
+          )
+          if (appendedDataAccess.nonEmpty || 1.toString == "1") {
+            val patchedDataAccess = existingDataAccess ++ appendedDataAccess
             datasetExisting.setAccess(patchedDataAccess.distinct.asJava)
 
             executeGoogleRequest(bq.datasets().patch(
@@ -1295,6 +1302,18 @@ class HttpGoogleServicesDAO(
       upsertTable(bq, perJobTable)
       upsertTable(bq, perMetricTable)
     })
+  }
+
+  /**
+    * Return only the elements from newList if their names don't exist in existingList.
+    */
+  private def findNewUniqueByName[A](existingList: mutable.Buffer[A],
+                                     newList: mutable.Buffer[A],
+                                     getName: A => String,
+                                    ): mutable.Buffer[A] = {
+    newList filterNot { newA =>
+      existingList.exists(getName(_) == getName(newA))
+    }
   }
 
   private def newTable(dataset: Dataset, name: String, columns: Map[String, StandardSQLTypeName]): Table = {
@@ -1334,10 +1353,11 @@ class HttpGoogleServicesDAO(
           table.getTableReference.getDatasetId,
           table.getTableReference.getTableId,
         ))
-        val newFields = table.getSchema.getFields.asScala
         val existingFields = tableExisting.getSchema.getFields.asScala
-        if (existingFields.diff(newFields).nonEmpty || 1.toString == "1") {
-          val patchedFields = existingFields ++ newFields
+        val newFields = table.getSchema.getFields.asScala
+        val appendedFields = findNewUniqueByName[TableFieldSchema](existingFields, newFields, _.getName)
+        if (appendedFields.nonEmpty || 1.toString == "1") {
+          val patchedFields = existingFields ++ appendedFields
           tableExisting.setSchema(new TableSchema().setFields(patchedFields.distinct.asJava))
 
           executeGoogleRequest(
