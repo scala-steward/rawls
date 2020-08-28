@@ -1200,6 +1200,7 @@ class HttpGoogleServicesDAO(
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
                                                    userProxygroupEmail: RawlsGroupEmail,
                                                   ): Future[Unit] = {
+    // TODO: Set initial schema version
     implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
     val credential = getBigqueryServiceAccountCredential
     credential.refreshToken()
