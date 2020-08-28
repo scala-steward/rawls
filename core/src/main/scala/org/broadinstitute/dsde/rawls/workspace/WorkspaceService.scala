@@ -11,7 +11,7 @@ import com.google.api.services.storage.model.StorageObject
 import com.typesafe.scalalogging.LazyLogging
 import io.opencensus.scala.Tracing._
 import io.opencensus.trace.{Span, Status, AttributeValue => OpenCensusAttributeValue}
-import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport, RawlsFatalExceptionWithErrorReport}
 import slick.jdbc.TransactionIsolation
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
@@ -1369,17 +1369,20 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
 
     println("FINDME: version 0.0.8")
 
+    // we could use another policy, but it needs to be one that's synced with Google, otherwise it won't know it exists
+    val workspacePolicyName = SamWorkspacePolicyNames.owner
     val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
 
-
     for {
-      // petSAJson <- samDAO.getPetServiceAccountKeyForUser(workspaceContext.namespace, userInfo.userEmail)
-      // petUserInfo <- gcsDAO.getUserInfoUsingJson(petSAJson)
-      // proxyUserEmail <- samDAO.getProxyGroup(userInfo, WorkbenchEmail(userInfo.userEmail.value))
-      // TODO: Is this adding the role at the project / organization level? Below I think we're adding it at the dataset level...
-      //_ <- gcsDAO.addRoleToGroup(RawlsBillingProjectName(workspaceContext.namespace), proxyGroupEmail, bqPolicy)
+      // get google proxy group email for the workspace owners and pass those as credentials for the dataset
+      // NOTE: calling `listPoliciesForResource` instead of `getPolicy` because only `listPoliciesForResource` returns SamPolicyWithNameAndEmail
       workspacePolicies <- samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceContext.workspaceId, userInfo)
-      canComputePolicyEmail = workspacePolicies.find((policy) => policy.policyName.toString() == "owner").head.email
+      canComputePolicyEmail <- workspacePolicies.collectFirst({
+        case policy if policy.policyName == workspacePolicyName => policy.email
+      }) match {
+        case Some(value) => Future.successful(value)
+        case None => Future.failed(new RawlsFatalExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, s"Unable to get workspace ${workspacePolicyName.value} group for ${workspaceContext.name}")))
+      }
       _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(RawlsBillingProjectName(workspaceContext.namespace),
                                                       RawlsGroupEmail(canComputePolicyEmail.value))
 

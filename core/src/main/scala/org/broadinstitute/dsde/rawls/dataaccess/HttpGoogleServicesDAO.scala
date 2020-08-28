@@ -1205,11 +1205,6 @@ class HttpGoogleServicesDAO(
     credential.refreshToken()
 
     val datasetId = "cromwell_metrics"
-
-    // TODO: set permissions on the dataset creation for the group of workspace owners
-    // TODO: should we be able to replace the role/policy for an existing userProxygroupEmail?
-    // https://cloud.google.com/bigquery/docs/access-control#bq-permissions
-
     val bqPolicy = "organizations/400176686919/roles/MetricsDatasetReadWrite"
     val dataset = new Dataset()
       .setDatasetReference(
