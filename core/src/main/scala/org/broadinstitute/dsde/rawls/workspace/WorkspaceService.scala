@@ -1367,7 +1367,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
 
-    println("FINDME: version 0.0.7")
+    println("FINDME: version 0.0.8")
 
     val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
 
@@ -1379,8 +1379,9 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       // TODO: Is this adding the role at the project / organization level? Below I think we're adding it at the dataset level...
       //_ <- gcsDAO.addRoleToGroup(RawlsBillingProjectName(workspaceContext.namespace), proxyGroupEmail, bqPolicy)
       workspacePolicies <- samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceContext.workspaceId, userInfo)
+      canComputePolicyEmail = workspacePolicies.find((policy) => policy.policyName.toString() == "owner").head.email
       _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(RawlsBillingProjectName(workspaceContext.namespace),
-                                                      RawlsGroupEmail(workspacePolicies.find((policy) => policy.policyName.toString() == "can-compute").head.email.value))
+                                                      RawlsGroupEmail(canComputePolicyEmail.value))
 
       result <- dataSource.inTransaction { dataAccess =>
         val submissionId: UUID = UUID.randomUUID()
