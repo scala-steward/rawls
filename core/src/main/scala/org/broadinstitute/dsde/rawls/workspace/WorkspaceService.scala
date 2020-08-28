@@ -1382,61 +1382,61 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(RawlsBillingProjectName(workspaceContext.namespace),
                                                       RawlsGroupEmail(workspacePolicies.find((policy) => policy.policyName.toString() == "can-compute").head.email.value))
 
-    result <- dataSource.inTransaction { dataAccess =>
-      val submissionId: UUID = UUID.randomUUID()
-      val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
-      val workflows = successes map { entityInputs =>
-        val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
-        Workflow(workflowId = None,
-          status = WorkflowStatuses.Queued,
-          statusLastChangedDate = DateTime.now,
-          workflowEntity = workflowEntityOpt,
-          inputResolutions = entityInputs.inputResolutions.toSeq
+      result <- dataSource.inTransaction { dataAccess =>
+        val submissionId: UUID = UUID.randomUUID()
+        val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
+        val workflows = successes map { entityInputs =>
+          val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
+          Workflow(workflowId = None,
+            status = WorkflowStatuses.Queued,
+            statusLastChangedDate = DateTime.now,
+            workflowEntity = workflowEntityOpt,
+            inputResolutions = entityInputs.inputResolutions.toSeq
+          )
+        }
+
+        val workflowFailures = failures map { entityInputs =>
+          val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
+          Workflow(workflowId = None,
+            status = WorkflowStatuses.Failed,
+            statusLastChangedDate = DateTime.now,
+            workflowEntity = workflowEntityOpt,
+            inputResolutions = entityInputs.inputResolutions.toSeq,
+            messages = (for (entityValue <- entityInputs.inputResolutions if entityValue.error.isDefined) yield AttributeString(entityValue.inputName + " - " + entityValue.error.get)).toSeq
+          )
+        }
+
+        val submissionEntityOpt = if (header.entityType.isEmpty || submissionRequest.entityName.isEmpty) {
+          None
+        } else {
+          Some(AttributeEntityReference(entityType = submissionRequest.entityType.get, entityName = submissionRequest.entityName.get))
+        }
+
+        val submission = Submission(submissionId = submissionId.toString,
+          submissionDate = DateTime.now(),
+          submitter = WorkbenchEmail(userInfo.userEmail.value),
+          methodConfigurationNamespace = submissionRequest.methodConfigurationNamespace,
+          methodConfigurationName = submissionRequest.methodConfigurationName,
+          submissionEntity = submissionEntityOpt,
+          workflows = workflows ++ workflowFailures,
+          status = SubmissionStatuses.Submitted,
+          useCallCache = submissionRequest.useCallCache,
+          deleteIntermediateOutputFiles = submissionRequest.deleteIntermediateOutputFiles,
+          workflowFailureMode = workflowFailureMode,
+          externalEntityInfo = for {
+            entityType <- header.entityType
+            dataStoreId <- header.entityStoreId
+          } yield ExternalEntityInfo(dataStoreId, entityType)
         )
+
+        // implicitly passed to SubmissionComponent.create
+        implicit val subStatusCounter = submissionStatusCounter(workspaceMetricBuilder(workspaceContext.toWorkspaceName))
+        implicit val wfStatusCounter = (status: WorkflowStatus) =>
+          if (config.trackDetailedSubmissionMetrics) Option(workflowStatusCounter(workspaceSubmissionMetricBuilder(workspaceContext.toWorkspaceName, submissionId))(status))
+          else None
+
+        dataAccess.submissionQuery.create(workspaceContext, submission)
       }
-
-      val workflowFailures = failures map { entityInputs =>
-        val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
-        Workflow(workflowId = None,
-          status = WorkflowStatuses.Failed,
-          statusLastChangedDate = DateTime.now,
-          workflowEntity = workflowEntityOpt,
-          inputResolutions = entityInputs.inputResolutions.toSeq,
-          messages = (for (entityValue <- entityInputs.inputResolutions if entityValue.error.isDefined) yield AttributeString(entityValue.inputName + " - " + entityValue.error.get)).toSeq
-        )
-      }
-
-      val submissionEntityOpt = if (header.entityType.isEmpty || submissionRequest.entityName.isEmpty) {
-        None
-      } else {
-        Some(AttributeEntityReference(entityType = submissionRequest.entityType.get, entityName = submissionRequest.entityName.get))
-      }
-
-      val submission = Submission(submissionId = submissionId.toString,
-        submissionDate = DateTime.now(),
-        submitter = WorkbenchEmail(userInfo.userEmail.value),
-        methodConfigurationNamespace = submissionRequest.methodConfigurationNamespace,
-        methodConfigurationName = submissionRequest.methodConfigurationName,
-        submissionEntity = submissionEntityOpt,
-        workflows = workflows ++ workflowFailures,
-        status = SubmissionStatuses.Submitted,
-        useCallCache = submissionRequest.useCallCache,
-        deleteIntermediateOutputFiles = submissionRequest.deleteIntermediateOutputFiles,
-        workflowFailureMode = workflowFailureMode,
-        externalEntityInfo = for {
-          entityType <- header.entityType
-          dataStoreId <- header.entityStoreId
-        } yield ExternalEntityInfo(dataStoreId, entityType)
-      )
-
-      // implicitly passed to SubmissionComponent.create
-      implicit val subStatusCounter = submissionStatusCounter(workspaceMetricBuilder(workspaceContext.toWorkspaceName))
-      implicit val wfStatusCounter = (status: WorkflowStatus) =>
-        if (config.trackDetailedSubmissionMetrics) Option(workflowStatusCounter(workspaceSubmissionMetricBuilder(workspaceContext.toWorkspaceName, submissionId))(status))
-        else None
-
-      dataAccess.submissionQuery.create(workspaceContext, submission)
-    }
     } yield result
   }
 
