@@ -1281,7 +1281,7 @@ class HttpGoogleServicesDAO(
             newDataAccess,
             _.getGroupByEmail,
           )
-          if (appendedDataAccess.nonEmpty || 1.toString == "1") {
+          if (appendedDataAccess.nonEmpty) {
             val patchedDataAccess = existingDataAccess ++ appendedDataAccess
             datasetExisting.setAccess(patchedDataAccess.distinct.asJava)
 
@@ -1351,7 +1351,7 @@ class HttpGoogleServicesDAO(
         val existingFields = tableExisting.getSchema.getFields.asScala
         val newFields = table.getSchema.getFields.asScala
         val appendedFields = findNewUniqueByName[TableFieldSchema](existingFields, newFields, _.getName)
-        if (appendedFields.nonEmpty || 1.toString == "1") {
+        if (appendedFields.nonEmpty) {
           val patchedFields = existingFields ++ appendedFields
           tableExisting.setSchema(new TableSchema().setFields(patchedFields.distinct.asJava))
 
