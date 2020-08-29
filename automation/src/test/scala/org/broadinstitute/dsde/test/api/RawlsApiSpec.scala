@@ -654,6 +654,121 @@ class RawlsApiSpec extends TestKit(ActorSystem("MySpec")) with FreeSpecLike with
       }
     }
 
+    "should support running workflows that can read and write to cromwell_metrics" in {
+      implicit val token: AuthToken = ownerAuthToken
+
+      val uuid = UUID.randomUUID()
+      val privateMethod: Method = MethodData.SimpleMethod.copy(
+        methodName = s"$uuid-bq_read_write",
+        payload =
+          s"""|version 1.0
+              |
+              |workflow test_cromwell_metrics {
+              |    call bq_read_write
+              |
+              |    output {
+              |        String out = bq_read_write.out
+              |    }
+              |}
+              |
+              |task bq_read_write {
+              |    command <<<
+              |        echo '{"per_job_id": "$uuid"}' | bq insert cromwell_metrics.per_job
+              |        bq --format json query \\
+              |            'select count(*) as cnt from cromwell_metrics.per_job where per_job_id = "$uuid"' \\
+              |        > output.json
+              |    >>>
+              |
+              |    output {
+              |        String out = read_string("output.json")
+              |    }
+              |
+              |    runtime {
+              |        docker: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+              |    }
+              |}
+              |""".stripMargin
+      )
+
+      withCleanBillingProject(owner) { projectName =>
+        withWorkspace(projectName, "bq-read-write") { workspaceName =>
+          withCleanUp {
+            Orchestration.methods.createMethod(privateMethod.creationAttributes)
+            register cleanUp Orchestration.methods.redact(privateMethod)
+
+            Orchestration.methodConfigurations.createMethodConfigInWorkspace(
+              wsNs = projectName,
+              wsName = workspaceName,
+              method = privateMethod,
+              configNamespace = SimpleMethodConfig.configNamespace,
+              configName = SimpleMethodConfig.configName,
+              methodConfigVersion = SimpleMethodConfig.snapshotId,
+              inputs = Map.empty,
+              outputs = Map.empty,
+              rootEntityType = SimpleMethodConfig.rootEntityType,
+            )
+
+            Orchestration.importMetaData(
+              ns = projectName,
+              wsName = workspaceName,
+              fileName = "entities",
+              fileContent = SingleParticipant.participantEntity,
+            )
+
+            // It currently takes ~ 5 min for google bucket read permissions to propagate.
+            // We can't launch a workflow until this happens.
+            // See https://github.com/broadinstitute/workbench-libs/pull/61
+            // and https://broadinstitute.atlassian.net/browse/GAWB-3327
+
+            Orchestration.workspaces.waitForBucketReadAccess(projectName, workspaceName)
+
+            val submissionId = Rawls.submissions.launchWorkflow(
+              billingProject = projectName,
+              workspaceName = workspaceName,
+              methodConfigurationNamespace = SimpleMethodConfig.configNamespace,
+              methodConfigurationName = SimpleMethodConfig.configName,
+              entityType = SimpleMethodConfig.rootEntityType,
+              entityName = SingleParticipant.entityId,
+              expression = "this",
+              useCallCache = false,
+              deleteIntermediateOutputFiles = false,
+            )
+
+            register cleanUp Rawls.submissions.abortSubmission(projectName, workspaceName, submissionId)
+
+            val submissionPatience = PatienceConfig(
+              timeout = scaled(Span(36, Minutes)),
+              interval = scaled(Span(30, Seconds)),
+            )
+            implicit val patienceConfig: PatienceConfig = submissionPatience
+
+            val workflowId = eventually {
+              val (status, workflows) = Rawls.submissions.getSubmissionStatus(projectName, workspaceName, submissionId)
+              val clue =
+                s"queue status: ${getQueueStatus()}, " +
+                  s"submission status: ${getSubmissionResponse(projectName, workspaceName, submissionId)}"
+              withClue(clue) {
+                workflows should not be (empty)
+                workflows.head
+              }
+            }
+
+            val notRunningMetadata = eventually {
+              val metadata = Rawls.submissions.getWorkflowMetadata(projectName, workspaceName, submissionId, workflowId)
+              val status = parseWorkflowStatusFromMetadata(metadata)
+              status should not be("Submitted")
+              status should not be("Running")
+              metadata
+            }
+
+            parseWorkflowStatusFromMetadata(notRunningMetadata) should be("Succeeded")
+            parseWorkflowOutputFromMetadata(notRunningMetadata, "test_cromwell_metrics.out") should
+              be("""[{"cnt":"1"}]""")
+          }
+        }
+      }
+    }
+
     "should fail to launch a submission with a reserved output attribute" in {
       implicit val token: AuthToken = ownerAuthToken
 
