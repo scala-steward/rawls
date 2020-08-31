@@ -1,5 +1,7 @@
 package org.broadinstitute.dsde.rawls.dataaccess
 
+import java.util.UUID
+
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import com.google.api.client.auth.oauth2.Credential
 import com.google.api.client.googleapis.testing.auth.oauth2.MockGoogleCredential
@@ -98,7 +100,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
 
   var mockProxyGroups = mutable.Map[RawlsUser, Boolean]()
 
-  override def setupWorkspace(userInfo: UserInfo, projectName: RawlsBillingProjectName, policyGroupsByAccessLevel: Map[WorkspaceAccessLevel, WorkbenchEmail], bucketName: String, labels: Map[String, String], parentSpan: Span =  null
+  override def setupWorkspace(userInfo: UserInfo, projectName: RawlsBillingProjectName, policyGroupsByAccessLevel: Map[WorkspaceAccessLevel, WorkbenchEmail], bucketName: String, labels: Map[String, String], parentSpan: Span = null
                              ): Future[GoogleWorkspaceInfo] = {
 
     val googleWorkspaceInfo: GoogleWorkspaceInfo = GoogleWorkspaceInfo(bucketName, policyGroupsByAccessLevel)
@@ -106,6 +108,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   }
 
   override def getAccessTokenUsingJson(saKey: String): Future[String] = Future.successful("token")
+
   override def getUserInfoUsingJson(saKey: String): Future[UserInfo] = Future.successful(UserInfo(RawlsUserEmail("foo@bar.com"), OAuth2BearerToken("test_token"), 0, RawlsUserSubjectId("12345678000")))
 
   override def getGoogleProject(billingProjectName: RawlsBillingProjectName): Future[Project] = Future.successful(new Project().setProjectNumber(42L))
@@ -133,7 +136,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   override def isAdmin(userEmail: String): Future[Boolean] = hasGoogleRole("fc-ADMINS@dev.test.firecloud.org", userEmail)
 
   def removeAdmin(userEmail: String): Future[Unit] = {
-    if(adminList.contains(userEmail)) {
+    if (adminList.contains(userEmail)) {
       adminList -= userEmail
       Future.successful(())
     }
@@ -150,7 +153,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   }
 
   override def removeLibraryCurator(userEmail: String): Future[Unit] = {
-    if(curatorList.contains(userEmail)) {
+    if (curatorList.contains(userEmail)) {
       curatorList -= userEmail
       Future.successful(())
     }
@@ -234,7 +237,15 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
                                                    datasetId: String,
                                                    groupEmails: List[RawlsGroupEmail],
-                                          ): Future[Unit] = {
+                                                  ): Future[Unit] = {
+    Future.successful(())
+  }
+
+  override def writeSubmissionDataToMetricsTable(workspaceId: String,
+                                                 workspaceName: WorkspaceName,
+                                                 submissionId: UUID,
+                                                 datasetId: String,
+                                                 billingProjectName: RawlsBillingProjectName): Future[Unit] = {
     Future.successful(())
   }
 }

@@ -1,5 +1,7 @@
 package org.broadinstitute.dsde.rawls.dataaccess
 
+import java.util.UUID
+
 import com.google.api.client.auth.oauth2.Credential
 import com.google.api.services.admin.directory.model.Group
 import com.google.api.services.cloudresourcemanager.model.Project
@@ -229,6 +231,12 @@ abstract class GoogleServicesDAO(groupsPrefix: String) extends ErrorReportable {
                                           datasetId: String,
                                           groupEmails: List[RawlsGroupEmail],
                                          ): Future[Unit]
+
+  def writeSubmissionDataToMetricsTable(workspaceId: String,
+                                        workspaceName: WorkspaceName,
+                                        submissionId: UUID,
+                                        datasetId: String,
+                                        name: RawlsBillingProjectName): Future[Unit]
 }
 
 object GoogleApiTypes {

@@ -1375,6 +1375,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     )
     // Create a workspace and cromwell metrics specific dataset name.
     val datasetId = "cromwell_metrics_" + workspaceContext.workspaceId.replace("-", "_")
+    val submissionId: UUID = UUID.randomUUID()
 
     for {
       // get google proxy group email for the workspace owners and pass those as credentials for the dataset
@@ -1388,9 +1389,10 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         datasetId,
         policyEmails,
       )
+      _ <- gcsDAO.writeSubmissionDataToMetricsTable(workspaceContext.workspaceId, workspaceContext.toWorkspaceName, submissionId, datasetId, RawlsBillingProjectName(workspaceContext.namespace))
+
 
       result <- dataSource.inTransaction { dataAccess =>
-        val submissionId: UUID = UUID.randomUUID()
         val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
         val workflows = successes map { entityInputs =>
           val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))

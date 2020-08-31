@@ -1211,8 +1211,7 @@ class HttpGoogleServicesDAO(
     cromwellMetricsOption match {
       case None => Future.successful(())
       case Some(cromwellMetrics) =>
-        // TODO: Set initial schema version
-        // TODO: Insert per_submission row
+        val bq: Bigquery = getBigquery
         implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
         val credential = getBigqueryServiceAccountCredential
         credential.refreshToken()
@@ -1247,7 +1246,6 @@ class HttpGoogleServicesDAO(
           fields = cromwellMetrics.schema.perMetric
         )
 
-        val bq: Bigquery = getBigquery
         retryWhen500orGoogleError(() => {
           try {
             executeGoogleRequest(bq.datasets().insert(
@@ -1287,6 +1285,7 @@ class HttpGoogleServicesDAO(
         })
     }
   }
+
 
   /**
     * Return only the elements from newList if their names don't exist in existingList.
@@ -1355,7 +1354,48 @@ class HttpGoogleServicesDAO(
         }
     }
   }
+
+  override def writeSubmissionDataToMetricsTable(workspaceId: String,
+                                                 workspaceName: WorkspaceName,
+                                                 submissionId: UUID,
+                                                 datasetId: String,
+                                                 billingProjectName: RawlsBillingProjectName): Future[Unit] = {
+    cromwellMetricsOption match {
+      case None => Future.successful(())
+      case Some(cromwellMetrics) =>
+        val bq: Bigquery = getBigquery
+        implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
+        val credential = getBigqueryServiceAccountCredential
+        credential.refreshToken()
+        val (major, minor, patch) = CromwellMetricsBqSchema.parseVersion(cromwellMetrics.schema.version)
+
+        retryWhen500orGoogleError(() => {
+          executeGoogleRequest(bq.tabledata().insertAll(
+            billingProjectName.value,
+            datasetId,
+            "per_submission",
+            new TableDataInsertAllRequest().setRows(
+              List(
+                new TableDataInsertAllRequest.Rows().setJson(
+                   Map[String, AnyRef](
+                    "submission_id" -> submissionId.toString,
+                    "workspace_id" -> workspaceId,
+                    "workspace_name" -> workspaceName.name,
+                    "billing_project" -> billingProjectName.value,
+                    "schema_version_major" -> Int.box(major),
+                    "schema_version_minor" -> Int.box(minor),
+                    "schema_version_patch" -> Int.box(patch),
+                  ).asJava
+                )
+              ).asJava
+            )
+          )
+        )
+      }
+    )}
+  }
 }
+
 
 class GoogleStorageLogException(message: String) extends RawlsException(message)
 
