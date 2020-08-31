@@ -45,7 +45,6 @@ import com.google.api.services.storage.model._
 import com.google.api.services.storage.{Storage, StorageScopes}
 import com.google.auth.oauth2.ServiceAccountCredentials
 import com.google.cloud.Identity
-import com.google.cloud.bigquery.StandardSQLTypeName
 import fs2.Stream
 import io.opencensus.scala.Tracing._
 import io.opencensus.trace.Span
@@ -130,7 +129,15 @@ class HttpGoogleServicesDAO(
   cleanupDeploymentAfterCreating: Boolean,
   terraBucketReaderRole: String,
   terraBucketWriterRole: String,
-  override val accessContextManagerDAO: AccessContextManagerDAO)(implicit val system: ActorSystem, val materializer: Materializer, implicit val executionContext: ExecutionContext, implicit val cs: ContextShift[IO], implicit val timer: Timer[IO]) extends GoogleServicesDAO(groupsPrefix) with FutureSupport with GoogleUtilities {
+  override val accessContextManagerDAO: AccessContextManagerDAO,
+  cromwellMetricsOption: Option[CromwellMetrics],
+)(
+  implicit val system: ActorSystem,
+  implicit val materializer: Materializer,
+  implicit val executionContext: ExecutionContext,
+  implicit val cs: ContextShift[IO],
+  implicit val timer: Timer[IO]
+) extends GoogleServicesDAO(groupsPrefix) with FutureSupport with GoogleUtilities {
   val http = Http(system)
   val httpClientUtils = HttpClientUtilsStandard()
   implicit val log4CatsLogger: _root_.io.chrisdavenport.log4cats.Logger[IO] = Slf4jLogger.getLogger[IO]
@@ -1198,106 +1205,87 @@ class HttpGoogleServicesDAO(
   }
 
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
-                                                   userProxygroupEmail: RawlsGroupEmail,
+                                                   groupEmail: RawlsGroupEmail,
                                                   ): Future[Unit] = {
-    // TODO: Set initial schema version
-    implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
-    val credential = getBigqueryServiceAccountCredential
-    credential.refreshToken()
+    cromwellMetricsOption match {
+      case None => Future.successful(())
+      case Some(cromwellMetrics) =>
+        // TODO: Set initial schema version
+        // TODO: Insert per_submission row
+        implicit val service: GoogleInstrumentedService.Value = GoogleInstrumentedService.CloudResourceManager
+        val credential = getBigqueryServiceAccountCredential
+        credential.refreshToken()
 
-    val datasetId = "cromwell_metrics"
-    val bqPolicy = "organizations/400176686919/roles/MetricsDatasetReadWrite"
-    val dataset = new Dataset()
-      .setDatasetReference(
-        new DatasetReference()
-          .setProjectId(projectName.value)
-          .setDatasetId(datasetId)
-      )
-      .setAccess(
-        List(
-          new Dataset.Access()
-            .setGroupByEmail(userProxygroupEmail.value)
-            .setRole(bqPolicy)
-        ).asJava
-      )
-
-    val perWorkspaceTable = newTable(
-      dataset = dataset,
-      name = "per_workspace",
-      columns = Map(
-        "workspace_name" -> StandardSQLTypeName.STRING,
-        "google_project" -> StandardSQLTypeName.STRING,
-        "schema_version_major" -> StandardSQLTypeName.INT64,
-        "schema_version_minor" -> StandardSQLTypeName.INT64,
-        "schema_version_patch" -> StandardSQLTypeName.INT64,
-      )
-    )
-    val perJobTable = newTable(
-      dataset = dataset,
-      name = "per_job",
-      columns = Map(
-        "per_job_id" -> StandardSQLTypeName.STRING,
-        "workspace_name" -> StandardSQLTypeName.STRING,
-        "submission_id" -> StandardSQLTypeName.STRING,
-        "workflow_id" -> StandardSQLTypeName.STRING,
-        "call_name" -> StandardSQLTypeName.STRING,
-        "call_attempt" -> StandardSQLTypeName.INT64,
-        "call_shard" -> StandardSQLTypeName.INT64,
-        "total_cpus_pct" -> StandardSQLTypeName.INT64,
-        "total_mem" -> StandardSQLTypeName.INT64,
-        "total_disk" -> StandardSQLTypeName.INT64,
-      )
-    )
-    val perMetricTable = newTable(
-      dataset = dataset,
-      name = "per_metric",
-      columns = Map(
-        "per_job_id" -> StandardSQLTypeName.STRING,
-        "timestamp" -> StandardSQLTypeName.TIMESTAMP,
-        "current_cpu_pct" -> StandardSQLTypeName.INT64,
-        "current_mem" -> StandardSQLTypeName.INT64,
-        "current_disk" -> StandardSQLTypeName.INT64,
-      )
-    )
-
-    val bq: Bigquery = getBigquery
-    retryWhen500orGoogleError( () => {
-      try {
-        executeGoogleRequest(bq.datasets().insert(
-          dataset.getDatasetReference.getProjectId,
-          dataset,
-        ))
-      } catch {
-        case exception: GoogleJsonResponseException
-          if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
-          val datasetExisting = executeGoogleRequest(bq.datasets().get(
-            dataset.getDatasetReference.getProjectId,
-            dataset.getDatasetReference.getDatasetId,
-          ))
-
-          val existingDataAccess = datasetExisting.getAccess.asScala
-          val newDataAccess = dataset.getAccess.asScala
-          val appendedDataAccess = findNewUniqueByName[Dataset.Access](
-            existingDataAccess,
-            newDataAccess,
-            _.getGroupByEmail,
+        val datasetId = "cromwell_metrics"
+        val dataset = new Dataset()
+          .setDatasetReference(
+            new DatasetReference()
+              .setProjectId(projectName.value)
+              .setDatasetId(datasetId)
           )
-          if (appendedDataAccess.nonEmpty) {
-            val patchedDataAccess = existingDataAccess ++ appendedDataAccess
-            datasetExisting.setAccess(patchedDataAccess.distinct.asJava)
+          .setAccess(
+            List(
+              new Dataset.Access()
+                .setGroupByEmail(groupEmail.value)
+                .setRole(cromwellMetrics.policy)
+            ).asJava
+          )
 
-            executeGoogleRequest(bq.datasets().patch(
+        val perWorkspaceTable = newTable(
+          dataset = dataset,
+          name = "per_workspace",
+          fields = cromwellMetrics.schema.perSubmission
+        )
+        val perJobTable = newTable(
+          dataset = dataset,
+          name = "per_job",
+          fields = cromwellMetrics.schema.perJob
+        )
+        val perMetricTable = newTable(
+          dataset = dataset,
+          name = "per_metric",
+          fields = cromwellMetrics.schema.perMetric
+        )
+
+        val bq: Bigquery = getBigquery
+        retryWhen500orGoogleError(() => {
+          try {
+            executeGoogleRequest(bq.datasets().insert(
               dataset.getDatasetReference.getProjectId,
-              dataset.getDatasetReference.getDatasetId,
-              datasetExisting,
+              dataset,
             ))
-          }
-      }
+          } catch {
+            case exception: GoogleJsonResponseException
+              if exception.getStatusCode == HttpStatusCodes.STATUS_CODE_CONFLICT =>
+              val datasetExisting = executeGoogleRequest(bq.datasets().get(
+                dataset.getDatasetReference.getProjectId,
+                dataset.getDatasetReference.getDatasetId,
+              ))
 
-      upsertTable(bq, perWorkspaceTable)
-      upsertTable(bq, perJobTable)
-      upsertTable(bq, perMetricTable)
-    })
+              val existingDataAccess = datasetExisting.getAccess.asScala
+              val newDataAccess = dataset.getAccess.asScala
+              val appendedDataAccess = findNewUniqueByName[Dataset.Access](
+                existingDataAccess,
+                newDataAccess,
+                _.getGroupByEmail,
+              )
+              if (appendedDataAccess.nonEmpty) {
+                val patchedDataAccess = existingDataAccess ++ appendedDataAccess
+                datasetExisting.setAccess(patchedDataAccess.distinct.asJava)
+
+                executeGoogleRequest(bq.datasets().patch(
+                  dataset.getDatasetReference.getProjectId,
+                  dataset.getDatasetReference.getDatasetId,
+                  datasetExisting,
+                ))
+              }
+          }
+
+          upsertTable(bq, perWorkspaceTable)
+          upsertTable(bq, perJobTable)
+          upsertTable(bq, perMetricTable)
+        })
+    }
   }
 
   /**
@@ -1312,11 +1300,11 @@ class HttpGoogleServicesDAO(
     }
   }
 
-  private def newTable(dataset: Dataset, name: String, columns: Map[String, StandardSQLTypeName]): Table = {
+  private def newTable(dataset: Dataset, name: String, fields: Map[String, String]): Table = {
     val schema = new TableSchema()
     schema.setFields(
-      columns.toList.map {
-        case (name, columnType) => new TableFieldSchema().setName(name).setType(columnType.toString)
+      fields.toList.map {
+        case (name, columnType) => new TableFieldSchema().setName(name).setType(columnType)
       }.asJava
     )
 

@@ -64,7 +64,9 @@ class MockBillingHttpGoogleServicesDAO( useServiceAccountForBuckets: Boolean,
     cleanupDeploymentAfterCreating = true,
     terraBucketReaderRole = "fakeTerraBucketReader",
     terraBucketWriterRole = "fakeTerraBucketWriter",
-    accessContextManagerDAO = new MockGoogleAccessContextManagerDAO)(system, materializer, executionContext, cs, timer) {
+    accessContextManagerDAO = new MockGoogleAccessContextManagerDAO,
+    cromwellMetricsOption = None,
+  )(system, materializer, executionContext, cs, timer) {
 
   private var token: String = null
   private var tokenDate: DateTime = null

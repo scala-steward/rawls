@@ -132,6 +132,8 @@ object Boot extends IOApp with LazyLogging {
       workbenchMetricBaseName = metricsPrefix
     )
 
+    val cromwellMetricsOption = CromwellMetrics.fromConfig(conf.getConfig("cromwell-metrics"))
+
     initAppDependencies[IO](conf).use { appDependencies =>
       val gcsDAO = new HttpGoogleServicesDAO(
         false,
@@ -163,7 +165,8 @@ object Boot extends IOApp with LazyLogging {
         cleanupDeploymentAfterCreating = dmConfig.cleanupDeploymentAfterCreating,
         terraBucketReaderRole = gcsConfig.getString("terraBucketReaderRole"),
         terraBucketWriterRole = gcsConfig.getString("terraBucketWriterRole"),
-        accessContextManagerDAO = accessContextManagerDAO
+        accessContextManagerDAO = accessContextManagerDAO,
+        cromwellMetricsOption = cromwellMetricsOption,
       )
 
 

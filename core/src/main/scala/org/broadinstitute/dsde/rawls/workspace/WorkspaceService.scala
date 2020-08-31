@@ -1367,11 +1367,10 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
 
-    println("FINDME: version 0.0.8")
+    println("FINDME: version 0.0.9")
 
     // we could use another policy, but it needs to be one that's synced with Google, otherwise it won't know it exists
     val workspacePolicyName = SamWorkspacePolicyNames.owner
-    val bqPolicy = "projects/broad-dsde-cromwell-dev/roles/CustomBigQueryInsertAndRead"
 
     for {
       // get google proxy group email for the workspace owners and pass those as credentials for the dataset
