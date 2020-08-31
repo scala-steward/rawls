@@ -1383,11 +1383,6 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       policyEmails = workspacePolicies.toList.collect({
         case policy if workspacePolicyNames.contains(policy.policyName) => RawlsGroupEmail(policy.email.value)
       })
-      _ = {
-        println(s"FINDME: BEGIN Policy emails ${policyEmails.size}:")
-        policyEmails.foreach(println)
-        println("FINDME: END Policy emails:")
-      }
       _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(
         RawlsBillingProjectName(workspaceContext.namespace),
         datasetId,
