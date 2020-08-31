@@ -657,42 +657,45 @@ class RawlsApiSpec extends TestKit(ActorSystem("MySpec")) with FreeSpecLike with
     "should support running workflows that can read and write to cromwell_metrics" in {
       implicit val token: AuthToken = ownerAuthToken
 
-      val uuid = UUID.randomUUID()
-      val privateMethod: Method = MethodData.SimpleMethod.copy(
-        methodName = s"$uuid-bq_read_write",
-        payload =
-          s"""|version 1.0
-              |
-              |workflow test_cromwell_metrics {
-              |    call bq_read_write
-              |
-              |    output {
-              |        String out = bq_read_write.out
-              |    }
-              |}
-              |
-              |task bq_read_write {
-              |    command <<<
-              |        echo '{"per_job_id": "$uuid"}' | bq insert cromwell_metrics.per_job
-              |        bq --format json query \\
-              |            'select count(*) as cnt from cromwell_metrics.per_job where per_job_id = "$uuid"' \\
-              |        > output.json
-              |    >>>
-              |
-              |    output {
-              |        String out = read_string("output.json")
-              |    }
-              |
-              |    runtime {
-              |        docker: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-              |    }
-              |}
-              |""".stripMargin
-      )
-
       withCleanBillingProject(owner) { projectName =>
         withWorkspace(projectName, "bq-read-write") { workspaceName =>
           withCleanUp {
+            val workspaceId = getWorkspaceId(projectName, workspaceName)
+            val datasetId = "cromwell_metrics_" + workspaceId.replace("-", "_")
+
+            val randomUuid = UUID.randomUUID()
+            val privateMethod: Method = MethodData.SimpleMethod.copy(
+              methodName = s"$randomUuid-bq_read_write",
+              payload =
+                s"""|version 1.0
+                    |
+                    |workflow test_cromwell_metrics {
+                    |    call bq_read_write
+                    |
+                    |    output {
+                    |        String out = bq_read_write.out
+                    |    }
+                    |}
+                    |
+                    |task bq_read_write {
+                    |    command <<<
+                    |        echo '{"per_job_id": "$randomUuid"}' | bq insert $datasetId.per_job
+                    |        bq --format json query \\
+                    |            'select count(*) as cnt from $datasetId.per_job where per_job_id = "$randomUuid"' \\
+                    |        > output.json
+                    |    >>>
+                    |
+                    |    output {
+                    |        String out = read_string("output.json")
+                    |    }
+                    |
+                    |    runtime {
+                    |        docker: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+                    |    }
+                    |}
+                    |""".stripMargin
+            )
+
             Orchestration.methods.createMethod(privateMethod.creationAttributes)
             register cleanUp Orchestration.methods.redact(privateMethod)
 

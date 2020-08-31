@@ -232,7 +232,8 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   override def getFolderId(folderName: String): Future[Option[String]] = Future.successful(Option("folders/1234567"))
 
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
-                                                   groupEmail: RawlsGroupEmail,
+                                                   datasetId: String,
+                                                   groupEmails: List[RawlsGroupEmail],
                                           ): Future[Unit] = {
     Future.successful(())
   }

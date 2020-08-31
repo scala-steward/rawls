@@ -1205,7 +1205,8 @@ class HttpGoogleServicesDAO(
   }
 
   override def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
-                                                   groupEmail: RawlsGroupEmail,
+                                                   datasetId: String,
+                                                   groupEmails: List[RawlsGroupEmail],
                                                   ): Future[Unit] = {
     cromwellMetricsOption match {
       case None => Future.successful(())
@@ -1216,7 +1217,6 @@ class HttpGoogleServicesDAO(
         val credential = getBigqueryServiceAccountCredential
         credential.refreshToken()
 
-        val datasetId = "cromwell_metrics"
         val dataset = new Dataset()
           .setDatasetReference(
             new DatasetReference()
@@ -1224,11 +1224,11 @@ class HttpGoogleServicesDAO(
               .setDatasetId(datasetId)
           )
           .setAccess(
-            List(
+            groupEmails.map { groupEmail =>
               new Dataset.Access()
                 .setGroupByEmail(groupEmail.value)
                 .setRole(cromwellMetrics.policy)
-            ).asJava
+            }.asJava
           )
 
         val perWorkspaceTable = newTable(

@@ -225,7 +225,10 @@ abstract class GoogleServicesDAO(groupsPrefix: String) extends ErrorReportable {
   def addProjectToFolder(projectName: RawlsBillingProjectName, folderId: String): Future[Unit]
   def getFolderId(folderName: String): Future[Option[String]]
 
-  def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName, groupEmail: RawlsGroupEmail): Future[Unit]
+  def createOrUpdateCromwellMetricsSchema(projectName: RawlsBillingProjectName,
+                                          datasetId: String,
+                                          groupEmails: List[RawlsGroupEmail],
+                                         ): Future[Unit]
 }
 
 object GoogleApiTypes {

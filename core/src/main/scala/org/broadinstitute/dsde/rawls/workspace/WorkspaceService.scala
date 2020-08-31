@@ -11,7 +11,7 @@ import com.google.api.services.storage.model.StorageObject
 import com.typesafe.scalalogging.LazyLogging
 import io.opencensus.scala.Tracing._
 import io.opencensus.trace.{Span, Status, AttributeValue => OpenCensusAttributeValue}
-import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport, RawlsFatalExceptionWithErrorReport}
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import slick.jdbc.TransactionIsolation
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.DataRepoDAO
@@ -1367,23 +1367,32 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
   // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
 
-    println("FINDME: version 0.0.9")
+    println("FINDME: version 0.0.10")
 
-    // we could use another policy, but it needs to be one that's synced with Google, otherwise it won't know it exists
-    val workspacePolicyName = SamWorkspacePolicyNames.owner
+    val workspacePolicyNames = List(
+      SamWorkspacePolicyNames.owner,
+      SamWorkspacePolicyNames.writer,
+    )
+    // Create a workspace and cromwell metrics specific dataset name.
+    val datasetId = "cromwell_metrics_" + workspaceContext.workspaceId.replace("-", "_")
 
     for {
       // get google proxy group email for the workspace owners and pass those as credentials for the dataset
       // NOTE: calling `listPoliciesForResource` instead of `getPolicy` because only `listPoliciesForResource` returns SamPolicyWithNameAndEmail
       workspacePolicies <- samDAO.listPoliciesForResource(SamResourceTypeNames.workspace, workspaceContext.workspaceId, userInfo)
-      canComputePolicyEmail <- workspacePolicies.collectFirst({
-        case policy if policy.policyName == workspacePolicyName => policy.email
-      }) match {
-        case Some(value) => Future.successful(value)
-        case None => Future.failed(new RawlsFatalExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, s"Unable to get workspace ${workspacePolicyName.value} group for ${workspaceContext.name}")))
+      policyEmails = workspacePolicies.toList.collect({
+        case policy if workspacePolicyNames.contains(policy.policyName) => RawlsGroupEmail(policy.email.value)
+      })
+      _ = {
+        println(s"FINDME: BEGIN Policy emails ${policyEmails.size}:")
+        policyEmails.foreach(println)
+        println("FINDME: END Policy emails:")
       }
-      _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(RawlsBillingProjectName(workspaceContext.namespace),
-                                                      RawlsGroupEmail(canComputePolicyEmail.value))
+      _ <- gcsDAO.createOrUpdateCromwellMetricsSchema(
+        RawlsBillingProjectName(workspaceContext.namespace),
+        datasetId,
+        policyEmails,
+      )
 
       result <- dataSource.inTransaction { dataAccess =>
         val submissionId: UUID = UUID.randomUUID()
