@@ -22,6 +22,8 @@ object CromwellMetrics {
   }
 }
 
+case class CromwellMetricsBqTable(name: String, fields: Map[String, String])
+
 case class CromwellMetricsBqSchema
 (
   version: String,
@@ -46,7 +48,13 @@ object CromwellMetricsBqSchema {
       perSubmissionFields = config.as[Map[String, String]]("per_submission_table"),
       additionalTables =
         additionalTableNames
-          .map(tableName => CromwellMetricsBqTable.fromConfig(tableName, additionalTablesConfig.getConfig(tableName))),
+          .map(
+            tableName =>
+              CromwellMetricsBqTable(
+                name = tableName,
+                fields = additionalTablesConfig.as[Map[String, String]](tableName),
+              )
+          ),
     )
   }
 
@@ -62,16 +70,5 @@ object CromwellMetricsBqSchema {
           ErrorReport(s"Invalid version: $version", ErrorReport(exception))
         )
     }
-  }
-}
-
-case class CromwellMetricsBqTable(name: String, fields: Map[String, String])
-
-object CromwellMetricsBqTable {
-  def fromConfig(tableName: String, tableConfig: Config): CromwellMetricsBqTable = {
-    CromwellMetricsBqTable(
-      name = tableName,
-      fields = tableConfig.as[Map[String, String]](tableName),
-    )
   }
 }
