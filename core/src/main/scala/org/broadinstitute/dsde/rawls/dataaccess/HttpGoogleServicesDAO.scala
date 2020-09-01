@@ -1230,19 +1230,19 @@ class HttpGoogleServicesDAO(
             }.asJava
           )
 
-        val perWorkspaceTable = newTable(
+        val perSubmissionTable = newTable(
           dataset = dataset,
-          name = "per_workspace",
+          name = CromwellMetricsBqSchema.PerSubmissionTable,
           fields = cromwellMetrics.schema.perSubmission
         )
         val perJobTable = newTable(
           dataset = dataset,
-          name = "per_job",
+          name = CromwellMetricsBqSchema.PerJob,
           fields = cromwellMetrics.schema.perJob
         )
         val perMetricTable = newTable(
           dataset = dataset,
-          name = "per_metric",
+          name = CromwellMetricsBqSchema.PerMetricTable,
           fields = cromwellMetrics.schema.perMetric
         )
 
@@ -1279,7 +1279,7 @@ class HttpGoogleServicesDAO(
               }
           }
 
-          upsertTable(bq, perWorkspaceTable)
+          upsertTable(bq, perSubmissionTable)
           upsertTable(bq, perJobTable)
           upsertTable(bq, perMetricTable)
         })
@@ -1373,7 +1373,7 @@ class HttpGoogleServicesDAO(
           executeGoogleRequest(bq.tabledata().insertAll(
             billingProjectName.value,
             datasetId,
-            "per_submission",
+            CromwellMetricsBqSchema.PerSubmissionTable,
             new TableDataInsertAllRequest().setRows(
               List(
                 new TableDataInsertAllRequest.Rows().setJson(

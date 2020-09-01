@@ -30,6 +30,10 @@ case class CromwellMetricsBqSchema
 )
 
 object CromwellMetricsBqSchema {
+  val PerSubmissionTable = "per_submission"
+  val PerJob = "per_job"
+  val PerMetricTable = "per_metric"
+
   def fromConfig(config: Config): CromwellMetricsBqSchema = {
     CromwellMetricsBqSchema(
       version = config.getString("version"),
