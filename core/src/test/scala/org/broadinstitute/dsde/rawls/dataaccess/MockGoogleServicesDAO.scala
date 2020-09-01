@@ -23,6 +23,7 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{ExecutionContext, Future}
 
+//noinspection TypeAnnotation,GetGetOrElse,AccessorLikeMethodIsEmptyParen,NameBooleanParameters,RedundantBlock,ConvertNullInitializerToUnderscore
 class MockGoogleServicesDAO(groupsPrefix: String,
                             override val accessContextManagerDAO: AccessContextManagerDAO = new MockGoogleAccessContextManagerDAO) extends GoogleServicesDAO(groupsPrefix) {
 
@@ -31,7 +32,6 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   private var token: String = null
   private var tokenDate: DateTime = null
 
-  private val groups: TrieMap[RawlsGroupRef, Set[Either[RawlsUser, RawlsGroup]]] = TrieMap()
   val policies: TrieMap[RawlsBillingProjectName, Map[String, Set[String]]] = TrieMap()
 
   val accessibleBillingAccountName = RawlsBillingAccountName("billingAccounts/firecloudHasThisOne")
@@ -92,15 +92,9 @@ class MockGoogleServicesDAO(groupsPrefix: String,
     "no-access" -> WorkspaceAccessLevels.NoAccess
   )
 
-  private def getAccessLevelOrDieTrying(userId: String) = {
-    mockPermissions get userId getOrElse {
-      throw new RuntimeException(s"Need to add ${userId} to MockGoogleServicesDAO.mockPermissions map")
-    }
-  }
-
   var mockProxyGroups = mutable.Map[RawlsUser, Boolean]()
 
-  override def setupWorkspace(userInfo: UserInfo, projectName: RawlsBillingProjectName, policyGroupsByAccessLevel: Map[WorkspaceAccessLevel, WorkbenchEmail], bucketName: String, labels: Map[String, String], parentSpan: Span = null
+  override def setupWorkspace(userInfo: UserInfo, projectName: RawlsBillingProjectName, policyGroupsByAccessLevel: Map[WorkspaceAccessLevel, WorkbenchEmail], bucketName: String, labels: Map[String, String], parentSpan: Span =  null
                              ): Future[GoogleWorkspaceInfo] = {
 
     val googleWorkspaceInfo: GoogleWorkspaceInfo = GoogleWorkspaceInfo(bucketName, policyGroupsByAccessLevel)
@@ -108,7 +102,6 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   }
 
   override def getAccessTokenUsingJson(saKey: String): Future[String] = Future.successful("token")
-
   override def getUserInfoUsingJson(saKey: String): Future[UserInfo] = Future.successful(UserInfo(RawlsUserEmail("foo@bar.com"), OAuth2BearerToken("test_token"), 0, RawlsUserSubjectId("12345678000")))
 
   override def getGoogleProject(billingProjectName: RawlsBillingProjectName): Future[Project] = Future.successful(new Project().setProjectNumber(42L))
@@ -136,7 +129,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   override def isAdmin(userEmail: String): Future[Boolean] = hasGoogleRole("fc-ADMINS@dev.test.firecloud.org", userEmail)
 
   def removeAdmin(userEmail: String): Future[Unit] = {
-    if (adminList.contains(userEmail)) {
+    if(adminList.contains(userEmail)) {
       adminList -= userEmail
       Future.successful(())
     }
@@ -153,7 +146,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   }
 
   override def removeLibraryCurator(userEmail: String): Future[Unit] = {
-    if (curatorList.contains(userEmail)) {
+    if(curatorList.contains(userEmail)) {
       curatorList -= userEmail
       Future.successful(())
     }

@@ -1364,11 +1364,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     }
   }
 
-  // TODO: need to add BigQuery tables here if they don't already exist
   def saveSubmission(workspaceContext: Workspace, submissionRequest: SubmissionRequest, submissionParameters: Seq[SubmissionValidationEntityInputs], workflowFailureMode: Option[WorkflowFailureMode], header: SubmissionValidationHeader): Future[Submission] = {
-
-    println("FINDME: version 0.0.10")
-
     val workspacePolicyNames = List(
       SamWorkspacePolicyNames.owner,
       SamWorkspacePolicyNames.writer,
@@ -1390,8 +1386,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         policyEmails,
       )
       _ <- gcsDAO.writeSubmissionDataToMetricsTable(workspaceContext.workspaceId, workspaceContext.toWorkspaceName, submissionId, datasetId, RawlsBillingProjectName(workspaceContext.namespace))
-
-
+      // Begin database transaction
       result <- dataSource.inTransaction { dataAccess =>
         val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
         val workflows = successes map { entityInputs =>
@@ -1828,7 +1823,6 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
       case ads => Map(WorkspaceService.SECURITY_LABEL_KEY -> WorkspaceService.HIGH_SECURITY_LABEL) ++ ads.map(ad => gcsDAO.labelSafeString(ad.membersGroupName.value, "ad-") -> "")
     }
 
-    // TODO: need to add BigQuery tables here
     def saveNewWorkspace(workspaceId: String, workspaceRequest: WorkspaceRequest, bucketName: String, projectOwnerPolicyEmail: WorkbenchEmail, dataAccess: DataAccess, parentSpan: Span = null): ReadWriteAction[(Workspace, Map[SamResourcePolicyName, WorkbenchEmail])] = {
       val currentDate = DateTime.now
 
