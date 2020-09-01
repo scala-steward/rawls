@@ -3,6 +3,7 @@ package org.broadinstitute.dsde.rawls.model
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.broadinstitute.dsde.rawls.RawlsFatalExceptionWithErrorReport
+import scala.collection.JavaConverters._
 
 case class CromwellMetrics
 (
@@ -24,22 +25,28 @@ object CromwellMetrics {
 case class CromwellMetricsBqSchema
 (
   version: String,
-  perSubmission: Map[String, String],
-  perJob: Map[String, String],
-  perMetric: Map[String, String],
+  perSubmissionFields: Map[String, String],
+  additionalTables: List[CromwellMetricsBqTable],
 )
 
 object CromwellMetricsBqSchema {
   val PerSubmissionTable = "per_submission"
-  val PerJob = "per_job"
-  val PerMetricTable = "per_metric"
 
   def fromConfig(config: Config): CromwellMetricsBqSchema = {
+    val additionalTablesConfig = config.getConfig("additional_tables")
+    val additionalTableNames =
+      additionalTablesConfig
+        .entrySet()
+        .asScala
+        .map(_.getKey.split("\\.").toSeq.head)
+        .toList
+
     CromwellMetricsBqSchema(
       version = config.getString("version"),
-      perSubmission = config.as[Map[String, String]]("per_submission"),
-      perJob = config.as[Map[String, String]]("per_job"),
-      perMetric = config.as[Map[String, String]]("per_metric"),
+      perSubmissionFields = config.as[Map[String, String]]("per_submission_table"),
+      additionalTables =
+        additionalTableNames
+          .map(tableName => CromwellMetricsBqTable.fromConfig(tableName, additionalTablesConfig.getConfig(tableName))),
     )
   }
 
@@ -55,5 +62,16 @@ object CromwellMetricsBqSchema {
           ErrorReport(s"Invalid version: $version", ErrorReport(exception))
         )
     }
+  }
+}
+
+case class CromwellMetricsBqTable(name: String, fields: Map[String, String])
+
+object CromwellMetricsBqTable {
+  def fromConfig(tableName: String, tableConfig: Config): CromwellMetricsBqTable = {
+    CromwellMetricsBqTable(
+      name = tableName,
+      fields = tableConfig.as[Map[String, String]](tableName),
+    )
   }
 }

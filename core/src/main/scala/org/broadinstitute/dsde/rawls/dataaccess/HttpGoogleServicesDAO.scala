@@ -1233,18 +1233,19 @@ class HttpGoogleServicesDAO(
         val perSubmissionTable = newTable(
           dataset = dataset,
           name = CromwellMetricsBqSchema.PerSubmissionTable,
-          fields = cromwellMetrics.schema.perSubmission
+          fields = cromwellMetrics.schema.perSubmissionFields
         )
-        val perJobTable = newTable(
-          dataset = dataset,
-          name = CromwellMetricsBqSchema.PerJob,
-          fields = cromwellMetrics.schema.perJob
-        )
-        val perMetricTable = newTable(
-          dataset = dataset,
-          name = CromwellMetricsBqSchema.PerMetricTable,
-          fields = cromwellMetrics.schema.perMetric
-        )
+        val additionalTables =
+          cromwellMetrics
+            .schema
+            .additionalTables
+            .map(additionalTable =>
+              newTable(
+                dataset = dataset,
+                name = additionalTable.name,
+                fields = additionalTable.fields,
+              )
+            )
 
         retryWhen500orGoogleError(() => {
           try {
@@ -1280,8 +1281,7 @@ class HttpGoogleServicesDAO(
           }
 
           upsertTable(bq, perSubmissionTable)
-          upsertTable(bq, perJobTable)
-          upsertTable(bq, perMetricTable)
+          additionalTables.map(upsertTable(bq, _))
         })
     }
   }
