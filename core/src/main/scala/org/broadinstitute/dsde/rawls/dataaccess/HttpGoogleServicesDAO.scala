@@ -1301,14 +1301,12 @@ class HttpGoogleServicesDAO(
   }
 
   private def newTable(dataset: Dataset, name: String, fields: List[(String, String)]): Table = {
-    // Remove any field named "timestamp"
-    val fieldsWithoutTimestamp =
+    val nonTimestampFields =
       for {
         (name, columnType) <- fields
-        if name != CromwellMetricsBqSchema.TimestampFieldName
       } yield new TableFieldSchema().setName(name).setType(columnType)
 
-    // Require the timestamp field always be provided
+    // Require that the timestamp field is not null because all queries need to specify a timestamp.
     val timestampField =
       new TableFieldSchema()
         .setName(CromwellMetricsBqSchema.TimestampFieldName)
@@ -1317,7 +1315,7 @@ class HttpGoogleServicesDAO(
 
     val schema =
       new TableSchema()
-        .setFields((timestampField +: fieldsWithoutTimestamp).asJava)
+        .setFields((timestampField +: nonTimestampFields).asJava)
 
     new Table()
       .setTableReference(
