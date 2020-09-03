@@ -1372,6 +1372,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
     // Create a workspace and cromwell metrics specific dataset name.
     val datasetId = "cromwell_metrics_" + workspaceContext.workspaceId.replace("-", "_")
     val submissionId: UUID = UUID.randomUUID()
+    val now: DateTime = DateTime.now()
 
     for {
       // get google proxy group email for the workspace owners and pass those as credentials for the dataset
@@ -1385,7 +1386,14 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         datasetId,
         policyEmails,
       )
-      _ <- gcsDAO.writeSubmissionDataToMetricsTable(workspaceContext.workspaceId, workspaceContext.toWorkspaceName, submissionId, datasetId, RawlsBillingProjectName(workspaceContext.namespace))
+      _ <- gcsDAO.writeSubmissionDataToMetricsTable(
+        workspaceId = workspaceContext.workspaceId,
+        workspaceName = workspaceContext.toWorkspaceName,
+        submissionId = submissionId,
+        submissionDateTime = now,
+        datasetId = datasetId,
+        billingProject = RawlsBillingProjectName(workspaceContext.namespace),
+      )
       // Begin database transaction
       result <- dataSource.inTransaction { dataAccess =>
         val (successes, failures) = submissionParameters.partition({ entityInputs => entityInputs.inputResolutions.forall(_.error.isEmpty) })
@@ -1393,7 +1401,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
           val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
           Workflow(workflowId = None,
             status = WorkflowStatuses.Queued,
-            statusLastChangedDate = DateTime.now,
+            statusLastChangedDate = now,
             workflowEntity = workflowEntityOpt,
             inputResolutions = entityInputs.inputResolutions.toSeq
           )
@@ -1403,7 +1411,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
           val workflowEntityOpt = header.entityType.map(_ => AttributeEntityReference(entityType = header.entityType.get, entityName = entityInputs.entityName))
           Workflow(workflowId = None,
             status = WorkflowStatuses.Failed,
-            statusLastChangedDate = DateTime.now,
+            statusLastChangedDate = now,
             workflowEntity = workflowEntityOpt,
             inputResolutions = entityInputs.inputResolutions.toSeq,
             messages = (for (entityValue <- entityInputs.inputResolutions if entityValue.error.isDefined) yield AttributeString(entityValue.inputName + " - " + entityValue.error.get)).toSeq
@@ -1417,7 +1425,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
         }
 
         val submission = Submission(submissionId = submissionId.toString,
-          submissionDate = DateTime.now(),
+          submissionDate = now,
           submitter = WorkbenchEmail(userInfo.userEmail.value),
           methodConfigurationNamespace = submissionRequest.methodConfigurationNamespace,
           methodConfigurationName = submissionRequest.methodConfigurationName,

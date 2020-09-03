@@ -22,17 +22,37 @@ object CromwellMetrics {
   }
 }
 
-case class CromwellMetricsBqTable(name: String, fields: Map[String, String])
+case class CromwellMetricsBqTable(name: String, fields: List[(String, String)])
 
 case class CromwellMetricsBqSchema
 (
   version: String,
-  perSubmissionFields: Map[String, String],
   additionalTables: List[CromwellMetricsBqTable],
 )
 
 object CromwellMetricsBqSchema {
-  val PerSubmissionTable = "per_submission"
+  val TimestampFieldName = "timestamp"
+  val TimestampFieldType = "TIMESTAMP"
+  val TimestampFieldMode = "REQUIRED"
+
+  val SubmissionIdFieldName = "submission_id"
+  val WorkspaceIdFieldName = "workspace_id"
+  val WorkspaceNamespaceFieldName = "workspace_namespace"
+  val WorkspaceNameFieldName = "workspace_name"
+  val SchemaVersionMajorFieldName = "schema_version_major"
+  val SchemaVersionMinorFieldName = "schema_version_minor"
+  val SchemaVersionPatchFieldName = "schema_version_patch"
+
+  val PerSubmissionTableName = "per_submission"
+  val PerSubmissionTableFields = List(
+    SubmissionIdFieldName -> "STRING",
+    WorkspaceIdFieldName -> "STRING",
+    WorkspaceNamespaceFieldName -> "STRING",
+    WorkspaceNameFieldName -> "STRING",
+    SchemaVersionMajorFieldName -> "INT64",
+    SchemaVersionMinorFieldName -> "INT64",
+    SchemaVersionPatchFieldName -> "INT64",
+  )
 
   def fromConfig(config: Config): CromwellMetricsBqSchema = {
     val additionalTablesConfig = config.getConfig("additional_tables")
@@ -45,14 +65,18 @@ object CromwellMetricsBqSchema {
 
     CromwellMetricsBqSchema(
       version = config.getString("version"),
-      perSubmissionFields = config.as[Map[String, String]]("per_submission_table"),
       additionalTables =
         additionalTableNames
           .map(
             tableName =>
               CromwellMetricsBqTable(
                 name = tableName,
-                fields = additionalTablesConfig.as[Map[String, String]](tableName),
+                fields = additionalTablesConfig
+                  .as[Map[String, String]](tableName)
+                  .toList
+                  .sortBy {
+                    case (name, _) => name
+                  },
               )
           ),
     )

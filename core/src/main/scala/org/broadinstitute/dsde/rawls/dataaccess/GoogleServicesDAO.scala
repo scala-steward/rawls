@@ -235,8 +235,10 @@ abstract class GoogleServicesDAO(groupsPrefix: String) extends ErrorReportable {
   def writeSubmissionDataToMetricsTable(workspaceId: String,
                                         workspaceName: WorkspaceName,
                                         submissionId: UUID,
+                                        submissionDateTime: DateTime,
                                         datasetId: String,
-                                        name: RawlsBillingProjectName): Future[Unit]
+                                        billingProject: RawlsBillingProjectName,
+                                       ): Future[Unit]
 }
 
 object GoogleApiTypes {

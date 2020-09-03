@@ -667,33 +667,44 @@ class RawlsApiSpec extends TestKit(ActorSystem("MySpec")) with FreeSpecLike with
             val privateMethod: Method = MethodData.SimpleMethod.copy(
               methodName = s"$randomUuid-bq_read_write",
               payload =
-                s"""|version 1.0
-                    |
-                    |workflow test_cromwell_metrics {
-                    |    call bq_read_write
-                    |
-                    |    output {
-                    |        String out = bq_read_write.out
-                    |    }
-                    |}
-                    |
-                    |task bq_read_write {
-                    |    command <<<
-                    |        echo '{"per_job_id": "$randomUuid"}' | bq insert $datasetId.per_job
-                    |        bq --format json query \\
-                    |            'select count(*) as cnt from $datasetId.per_job where per_job_id = "$randomUuid"' \\
-                    |        > output.json
-                    |    >>>
-                    |
-                    |    output {
-                    |        String out = read_string("output.json")
-                    |    }
-                    |
-                    |    runtime {
-                    |        docker: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-                    |    }
-                    |}
-                    |""".stripMargin
+                s"""version 1.0
+                   |
+                   |workflow test_cromwell_metrics {
+                   |    call bq_read_write
+                   |
+                   |    output {
+                   |        String out = bq_read_write.out
+                   |    }
+                   |}
+                   |
+                   |task bq_read_write {
+                   |    command <<<
+                   |        set -euo pipefail
+                   |        # write to bq
+                   |        printf '{"timestamp": "%s", "per_job_id": "%s"}' \\
+                   |          "$$(date --iso-8601=seconds)" \\
+                   |          $randomUuid |
+                   |        bq insert $datasetId.per_job
+                   |        # read from bq
+                   |        bq --format json query --nouse_legacy_sql '
+                   |          select count(*) as cnt
+                   |            from $datasetId.per_job
+                   |            where per_job_id = "$randomUuid"
+                   |              and timestamp is not null
+                   |            limit 1
+                   |          ' \\
+                   |        > output.json
+                   |    >>>
+                   |
+                   |    output {
+                   |        String out = read_string("output.json")
+                   |    }
+                   |
+                   |    runtime {
+                   |        docker: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+                   |    }
+                   |}
+                   |""".stripMargin
             )
 
             Orchestration.methods.createMethod(privateMethod.creationAttributes)

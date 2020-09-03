@@ -64,6 +64,7 @@ import org.broadinstitute.dsde.workbench.google2.util.RetryPredicates
 import org.broadinstitute.dsde.workbench.model.google.{GcsBucketName, GoogleProject, GoogleResourceTypes}
 import org.broadinstitute.dsde.workbench.model.{TraceId, WorkbenchEmail}
 import org.joda.time
+import org.joda.time.DateTime
 import spray.json._
 
 import scala.collection.JavaConverters._
@@ -1232,8 +1233,8 @@ class HttpGoogleServicesDAO(
 
         val perSubmissionTable = newTable(
           dataset = dataset,
-          name = CromwellMetricsBqSchema.PerSubmissionTable,
-          fields = cromwellMetrics.schema.perSubmissionFields
+          name = CromwellMetricsBqSchema.PerSubmissionTableName,
+          fields = CromwellMetricsBqSchema.PerSubmissionTableFields,
         )
         val additionalTables =
           cromwellMetrics
@@ -1299,23 +1300,39 @@ class HttpGoogleServicesDAO(
     }
   }
 
-  private def newTable(dataset: Dataset, name: String, fields: Map[String, String]): Table = {
-    val schema = new TableSchema()
-    schema.setFields(
-      fields.toList.map {
-        case (name, columnType) => new TableFieldSchema().setName(name).setType(columnType)
-      }.asJava
-    )
+  private def newTable(dataset: Dataset, name: String, fields: List[(String, String)]): Table = {
+    // Remove any field named "timestamp"
+    val fieldsWithoutTimestamp =
+      for {
+        (name, columnType) <- fields
+        if name != CromwellMetricsBqSchema.TimestampFieldName
+      } yield new TableFieldSchema().setName(name).setType(columnType)
 
-    val table = new Table()
-    table.setTableReference(
-      new TableReference()
-        .setProjectId(dataset.getDatasetReference.getProjectId)
-        .setDatasetId(dataset.getDatasetReference.getDatasetId)
-        .setTableId(name)
-    )
-    table.setSchema(schema)
-    table
+    // Require the timestamp field always be provided
+    val timestampField =
+      new TableFieldSchema()
+        .setName(CromwellMetricsBqSchema.TimestampFieldName)
+        .setType(CromwellMetricsBqSchema.TimestampFieldType)
+        .setMode(CromwellMetricsBqSchema.TimestampFieldMode)
+
+    val schema =
+      new TableSchema()
+        .setFields((timestampField +: fieldsWithoutTimestamp).asJava)
+
+    new Table()
+      .setTableReference(
+        new TableReference()
+          .setProjectId(dataset.getDatasetReference.getProjectId)
+          .setDatasetId(dataset.getDatasetReference.getDatasetId)
+          .setTableId(name)
+      )
+      .setSchema(schema)
+      .setTimePartitioning(
+        new TimePartitioning()
+          .setField(CromwellMetricsBqSchema.TimestampFieldName)
+          // Queries must specify the `timestamp` for each table
+          .setRequirePartitionFilter(true)
+      )
   }
 
   private def upsertTable(bq: Bigquery, table: Table)(implicit counters: GoogleCounters): Unit = {
@@ -1358,8 +1375,10 @@ class HttpGoogleServicesDAO(
   override def writeSubmissionDataToMetricsTable(workspaceId: String,
                                                  workspaceName: WorkspaceName,
                                                  submissionId: UUID,
+                                                 submissionDateTime: DateTime,
                                                  datasetId: String,
-                                                 billingProjectName: RawlsBillingProjectName): Future[Unit] = {
+                                                 billingProject: RawlsBillingProjectName,
+                                                ): Future[Unit] = {
     cromwellMetricsOption match {
       case None => Future.successful(())
       case Some(cromwellMetrics) =>
@@ -1371,24 +1390,25 @@ class HttpGoogleServicesDAO(
 
         retryWhen500orGoogleError(() => {
           executeGoogleRequest(bq.tabledata().insertAll(
-            billingProjectName.value,
+            billingProject.value,
             datasetId,
-            CromwellMetricsBqSchema.PerSubmissionTable,
+            CromwellMetricsBqSchema.PerSubmissionTableName,
             new TableDataInsertAllRequest().setRows(
               List(
                 new TableDataInsertAllRequest.Rows().setJson(
                    Map[String, AnyRef](
-                    "submission_id" -> submissionId.toString,
-                    "workspace_id" -> workspaceId,
-                    "workspace_name" -> workspaceName.name,
-                    "billing_project" -> billingProjectName.value,
-                    "schema_version_major" -> Int.box(major),
-                    "schema_version_minor" -> Int.box(minor),
-                    "schema_version_patch" -> Int.box(patch),
+                    CromwellMetricsBqSchema.TimestampFieldName -> submissionDateTime.toString,
+                    CromwellMetricsBqSchema.WorkspaceIdFieldName -> workspaceId,
+                    CromwellMetricsBqSchema.WorkspaceNamespaceFieldName -> workspaceName.namespace,
+                    CromwellMetricsBqSchema.WorkspaceNameFieldName -> workspaceName.name,
+                    CromwellMetricsBqSchema.SubmissionIdFieldName -> submissionId.toString,
+                    CromwellMetricsBqSchema.SchemaVersionMajorFieldName -> Int.box(major),
+                    CromwellMetricsBqSchema.SchemaVersionMinorFieldName -> Int.box(minor),
+                    CromwellMetricsBqSchema.SchemaVersionPatchFieldName -> Int.box(patch),
                   ).asJava
                 )
               ).asJava
-            )
+            ),
           )
         )
       }

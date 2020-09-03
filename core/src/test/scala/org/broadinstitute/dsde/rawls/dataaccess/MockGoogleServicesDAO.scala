@@ -237,6 +237,7 @@ class MockGoogleServicesDAO(groupsPrefix: String,
   override def writeSubmissionDataToMetricsTable(workspaceId: String,
                                                  workspaceName: WorkspaceName,
                                                  submissionId: UUID,
+                                                 submissionDateTime: DateTime,
                                                  datasetId: String,
                                                  billingProjectName: RawlsBillingProjectName): Future[Unit] = {
     Future.successful(())
