@@ -22,7 +22,9 @@ object MarthaDosResolver {
       case Some(uri) =>
         uri.host match {
           case Some(host) => excludeDomains.contains(host)
-          case None => false
+          case None =>
+            // If for some reason we can't analyze the URI, we assume it's not safe to ignore
+            false
         }
       case None =>
         // If for some reason we can't analyze the URI, we assume it's not safe to ignore
