@@ -12,7 +12,7 @@ import org.broadinstitute.dsde.rawls.util.{HttpClientUtilsStandard, Retry}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class MarthaDrsResolver(marthaUrl: String)(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext) extends DrsResolver with DsdeHttpDAO with Retry {
+class MarthaDrsResolver(marthaUrl: String, excludeJDRDomain: Boolean)(implicit val system: ActorSystem, val materializer: Materializer, val executionContext: ExecutionContext) extends DrsResolver with DsdeHttpDAO with Retry {
   import MarthaJsonSupport._
   import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
   import spray.json.DefaultJsonProtocol._
@@ -20,18 +20,13 @@ class MarthaDrsResolver(marthaUrl: String)(implicit val system: ActorSystem, val
   val http: HttpExt = Http(system)
   val httpClientUtils: HttpClientUtilsStandard = HttpClientUtilsStandard()
 
-  def resolveDrsThroughMartha(drsUrl: String, userInfo: UserInfo): Future[MarthaMinimalResponse] = {
+  def getClientEmailFromMartha(drsUrl: String, userInfo: UserInfo): Future[Option[String]] = {
     val content = Map("url" -> drsUrl)
-
-    Marshal(content).to[RequestEntity] flatMap { entity =>
+    val marthaResponse: Future[MarthaMinimalResponse] = Marshal(content).to[RequestEntity] flatMap { entity =>
       retry[MarthaMinimalResponse](when500) { () =>
         executeRequestWithToken[MarthaMinimalResponse](userInfo.accessToken)(Post(marthaUrl, entity))
       }
     }
-  }
-
-  override def drsServiceAccountEmail(drsUrl: String, userInfo: UserInfo): Future[Option[String]] = {
-    val marthaResponse = resolveDrsThroughMartha(drsUrl, userInfo)
 
     // Evan idea 2020-09-08:
     // Have Rawls call an "SA-only" endpoint in Martha because it doesn't need any URI info (calls Bond but not overloaded DRS servers)
@@ -41,10 +36,19 @@ class MarthaDrsResolver(marthaUrl: String)(implicit val system: ActorSystem, val
       val saEmail: Option[String] = resp.googleServiceAccount.flatMap(_.data.map(_.client_email))
 
       if (saEmail.isEmpty) {
-        logger.info(s"MarthaDrsResolver.drsServiceAccountEmail returned no SA for drs URL '$drsUrl'")
+        logger.info(s"MarthaDrsResolver.drsServiceAccountEmail returned no SA for dos URL $drsUrl")
       }
 
       saEmail
+    }
+  }
+
+  override def drsServiceAccountEmail(drsUrl: String, userInfo: UserInfo): Future[Option[String]] = {
+    if (excludeJDRDomain && MarthaUtils.isJDRDomain(drsUrl)) {
+      // Temporarily decline to look up TDR DRS objects in Martha because no SA is returned (no-op in Rawls)
+      Future.successful(None)
+    } else {
+      getClientEmailFromMartha(drsUrl, userInfo)
     }
   }
 }
