@@ -21,7 +21,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FlatSpecLike, Match
 import akka.http.scaladsl.model.StatusCodes
 import akka.stream.ActorMaterializer
 import org.broadinstitute.dsde.rawls.config.MethodRepoConfig
-import org.broadinstitute.dsde.rawls.dataaccess.martha.DosResolver
+import org.broadinstitute.dsde.rawls.dataaccess.martha.DrsResolver
 import org.broadinstitute.dsde.workbench.model.WorkbenchEmail
 import spray.json.DefaultJsonProtocol._
 import spray.json._
@@ -44,7 +44,7 @@ class WorkflowSubmissionSpec(_system: ActorSystem) extends TestKit(_system) with
   val mockSamDAO = new MockSamDAO(slickDataSource)
   val dosServiceAccount = "serviceaccount@foo.com"
   val differentDosServiceAccount = "differentserviceaccount@foo.com"
-  val mockDosResolver: DosResolver = (v: String, userInfo: UserInfo) => Future.successful(if (v.contains("different")) Some(differentDosServiceAccount) else Some(dosServiceAccount))
+  val mockDosResolver: DrsResolver = (v: String, userInfo: UserInfo) => Future.successful(if (v.contains("different")) Some(differentDosServiceAccount) else Some(dosServiceAccount))
   private val requesterPaysRole = "requesterPays"
 
   /** Extension of WorkflowSubmission to allow us to intercept and validate calls to the execution service.
@@ -74,7 +74,7 @@ class WorkflowSubmissionSpec(_system: ActorSystem) extends TestKit(_system) with
       MethodRepoConfig[Dockstore.type](mockServer.mockServerBaseUrl, ""),
       workbenchMetricBaseName = workbenchMetricBaseName)
     val samDAO = mockSamDAO
-    val dosResolver = mockDosResolver
+    val drsResolver = mockDosResolver
   }
 
   class TestWorkflowSubmissionWithMockExecSvc(

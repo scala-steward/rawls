@@ -20,7 +20,7 @@ import io.chrisdavenport.log4cats.slf4j.Slf4jLogger
 import net.ceedubs.ficus.Ficus._
 import org.broadinstitute.dsde.rawls.config.{WDLParserConfig, _}
 import org.broadinstitute.dsde.rawls.dataaccess.datarepo.HttpDataRepoDAO
-import org.broadinstitute.dsde.rawls.dataaccess.martha.MarthaDosResolver
+import org.broadinstitute.dsde.rawls.dataaccess.martha.MarthaDrsResolver
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.HttpWorkspaceManagerDAO
 import slick.basic.DatabaseConfig
 import slick.jdbc.JdbcProfile
@@ -265,8 +265,11 @@ object Boot extends IOApp with LazyLogging {
       )
 
       val marthaConfig = conf.getConfig("martha")
-      val excludeJDRDomain: Boolean = marthaConfig.getOrElse("exclude_JDR_Domain", false)
-      val dosResolver = new MarthaDosResolver(marthaConfig.getString("baseUrl_v2"), excludeJDRDomain)
+      val marthaVersion: Int = marthaConfig.getIntOption("version").getOrElse(2)
+      val drsResolver = marthaVersion match {
+        case 3 => new MarthaDrsResolver(marthaConfig.getString("url_v3"))
+        case _ => new MarthaDrsResolver(marthaConfig.getString("baseUrl_v2"))
+      }
 
       val userServiceConstructor: (UserInfo) => UserService =
         UserService.constructor(
@@ -433,7 +436,7 @@ object Boot extends IOApp with LazyLogging {
           importServiceDAO,
           appDependencies.googleStorageService,
           methodRepoDAO,
-          dosResolver,
+          drsResolver,
           entityServiceConstructor,
           shardedExecutionServiceCluster,
           maxActiveWorkflowsTotal,
