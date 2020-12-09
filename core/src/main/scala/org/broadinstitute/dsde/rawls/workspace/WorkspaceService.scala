@@ -2138,7 +2138,8 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
             // add the workspace id to the span so we can find and correlate it later with other services
             s1.putAttribute("workspaceId", OpenCensusAttributeValue.stringAttributeValue(workspaceId))
 
-            traceDBIOWithParent("getPolicySyncStatus", s1)(_ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, workspaceRequest.namespace, SamBillingProjectPolicyNames.owner, userInfo).map(_.email))).flatMap { projectOwnerPolicyEmail =>
+            //            traceDBIOWithParent("getPolicySyncStatus", s1)(_ => DBIO.from(samDAO.getPolicySyncStatus(SamResourceTypeNames.billingProject, workspaceRequest.namespace, SamBillingProjectPolicyNames.owner, userInfo).map(_.email))).flatMap { projectOwnerPolicyEmail =>
+            val projectOwnerPolicyEmail = WorkbenchEmail("fakeemailaj")
               traceDBIOWithParent("setupGoogleProject", s1)(_ => DBIO.from(setupGoogleProject(billingProject, s1, workspaceId))).flatMap { case (googleProjectId, googleProjectNumber) =>
                 traceDBIOWithParent("saveNewWorkspace", s1)(s2 => saveNewWorkspace(workspaceId, workspaceRequest, bucketName, projectOwnerPolicyEmail, googleProjectId, Option(googleProjectNumber), dataAccess, s2).flatMap { case (savedWorkspace, policyMap) =>
                   for {
@@ -2161,7 +2162,7 @@ class WorkspaceService(protected val userInfo: UserInfo, val dataSource: SlickDa
                   } yield response
                 })
               }
-            }
+//            }
         }
       })
     })
