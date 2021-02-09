@@ -279,15 +279,7 @@ class WorkspaceApiSpec extends TestKit(ActorSystem("MySpec")) with AnyFreeSpecLi
             logger.info(s"Claimed destination project $destProjectName")
             // The original workspace is in the source project. The user is a Reader on this workspace and does not belong to the source project.
             withWorkspace(sourceProjectName, workspaceName, aclEntries = List(AclEntry(user.email, WorkspaceAccessLevel.Reader))) { workspaceName =>
-              withCleanUp {
-                logger.info(s"Created workspace $workspaceName")
-                Rawls.workspaces.enableRequesterPays(sourceProjectName, workspaceName)(ownerToken)
-                logger.info(s"Enabled requester pays on $workspaceName")
-                Rawls.workspaces.clone(sourceProjectName, workspaceName, destProjectName, workspaceCloneName)(userToken)
-                logger.info(s"Cloned $workspaceName")
-                workspaceResponse(Rawls.workspaces.getWorkspaceDetails(destProjectName, workspaceCloneName)(userToken)).workspace.name should be(workspaceCloneName)
-                logger.info("Clone created")
-              }
+              logger.info(s"Created workspace $workspaceName")
             }(ownerToken)
           }
         }
