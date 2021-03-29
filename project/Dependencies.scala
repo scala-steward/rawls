@@ -61,7 +61,7 @@ object Dependencies {
   val googleRpcNettyShaded: ModuleID =    "io.grpc" % "grpc-netty-shaded" % "1.36.0"
   val googleCloudCoreGrpc: ModuleID =     "com.google.cloud" % "google-cloud-core-grpc" % "1.94.4"
 
-  val googleAutoValue: ModuleID =         "com.google.auto.value" % "auto-value-annotations" % "1.7.4"
+  val googleAutoValue: ModuleID =         "com.google.auto.value" % "auto-value-annotations" % "1.7.5"
 
   val googleOAuth2too: ModuleID = "com.google.auth" % "google-auth-library-oauth2-http" % "0.24.1"
 
@@ -69,22 +69,22 @@ object Dependencies {
   val metricsScala: ModuleID =       "nl.grons"              %% "metrics4-scala"    % "4.1.14"
   val metricsStatsd: ModuleID =      "com.readytalk"         %  "metrics3-statsd"  % "4.2.0"
 
-  val scalaLogging: ModuleID =    "com.typesafe.scala-logging"    %% "scala-logging"        % "3.9.2"
+  val scalaLogging: ModuleID =    "com.typesafe.scala-logging"    %% "scala-logging"        % "3.9.3"
   val jacksonCore: ModuleID =     "com.fasterxml.jackson.core"    % "jackson-core"          % "2.12.2"
   val jodaTime: ModuleID =        "joda-time"                     % "joda-time"             % "2.10.10"
   val jodaConvert: ModuleID =     "org.joda"                      % "joda-convert"          % "2.2.1"
   val typesafeConfig: ModuleID =  "com.typesafe"                  % "config"                % "1.4.1"
   val sentryLogback: ModuleID =   "io.sentry"                     % "sentry-logback"        % "1.7.30"
-  val swaggerUI: ModuleID =       "org.webjars.npm"               % "swagger-ui-dist"       % "3.45.0"
+  val swaggerUI: ModuleID =       "org.webjars.npm"               % "swagger-ui-dist"       % "3.45.1"
   val webjarsLocator: ModuleID =  "org.webjars"                   % "webjars-locator"       % "0.40"
   val commonsJEXL: ModuleID =     "org.apache.commons"            % "commons-jexl"          % "2.1.1"
   val httpClient: ModuleID =      "org.apache.httpcomponents"     % "httpclient"            % "4.5.13"  // upgrading a transitive dependency to avoid security warnings
   val cats: ModuleID =            "org.typelevel"                 %% "cats-core"                 % "2.4.2"
   val parserCombinators =         "org.scala-lang.modules"        %% "scala-parser-combinators" % "1.1.2"
   val mysqlConnector: ModuleID =  "mysql"                         % "mysql-connector-java"  % "5.1.49"
-  val liquibaseCore: ModuleID =   "org.liquibase"                 % "liquibase-core"        % "4.3.1"
+  val liquibaseCore: ModuleID =   "org.liquibase"                 % "liquibase-core"        % "4.3.2"
   val logbackClassic: ModuleID =  "ch.qos.logback"                % "logback-classic"       % "1.2.3"
-  val scalaUri: ModuleID =        "io.lemonlabs"                  %% "scala-uri"            % "3.1.0"
+  val scalaUri: ModuleID =        "io.lemonlabs"                  %% "scala-uri"            % "3.2.0"
   val scalatest: ModuleID =       "org.scalatest"                 %% "scalatest"            % "3.2.6" % "test"
   val mockito: ModuleID =         "org.scalatestplus"             %% "mockito-3-4"          % "3.2.6.0" % "test"
   val mockserverNetty: ModuleID = "org.mock-server"               % "mockserver-netty"      % "5.11.2" % "test"
