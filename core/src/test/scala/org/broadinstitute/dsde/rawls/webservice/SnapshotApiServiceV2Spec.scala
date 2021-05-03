@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.rawls.webservice
 
 import java.util.UUID
+
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import akka.http.scaladsl.server.Route.{seal => sealRoute}
@@ -16,9 +17,9 @@ import org.broadinstitute.dsde.rawls.openam.MockUserInfoDirectives
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-class SnapshotApiServiceSpec extends ApiServiceSpec {
+class SnapshotApiServiceV2Spec extends ApiServiceSpec {
 
-  val baseSnapshotsPath = s"${testData.wsName.path}/snapshots"
+  val baseSnapshotsPath = s"${testData.wsName.path}/snapshots/v2"
 
   val defaultNamedSnapshotJson = httpJson(NamedDataRepoSnapshot(
     name = DataReferenceName("foo"),

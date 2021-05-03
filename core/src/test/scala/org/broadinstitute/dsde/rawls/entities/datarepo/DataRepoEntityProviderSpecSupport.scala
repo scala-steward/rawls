@@ -4,7 +4,7 @@ import java.util.UUID
 
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import bio.terra.datarepo.model.{ColumnModel, RelationshipModel, SnapshotModel, TableModel}
-import bio.terra.workspace.model.{CloningInstructionsEnum, DataReferenceDescription, DataRepoSnapshot, ReferenceTypeEnum}
+import bio.terra.workspace.model._
 import org.broadinstitute.dsde.rawls.config.DataRepoEntityProviderConfig
 import org.broadinstitute.dsde.rawls.dataaccess.workspacemanager.WorkspaceManagerDAO
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleBigQueryServiceFactory, MockBigQueryServiceFactory, SamDAO, SlickDataSource}
@@ -70,22 +70,23 @@ trait DataRepoEntityProviderSpecSupport {
                                workspaceId: UUID = wsId,
                                refInstanceName: String = dataRepoInstanceName,
                                refSnapshot: String = snapshot,
-                               reference: Option[DataRepoSnapshot] = None
-                              ): DataReferenceDescription = {
+                               reference: Option[DataRepoSnapshotAttributes] = None
+                              ): DataRepoSnapshotResource = {
 
     val dataRepoReference = reference match {
       case Some(s) => s
-      case None => new DataRepoSnapshot().instanceName(refInstanceName).snapshot(refSnapshot)
+      case None => new DataRepoSnapshotAttributes().instanceName(refInstanceName).snapshot(refSnapshot)
     }
 
-    new DataReferenceDescription()
-      .name(name)
-      .referenceType(referenceType)
-      .referenceId(referenceId)
-      .cloningInstructions(cloningInstructionsEnum)
-      .credentialId(credentialId)
-      .reference(dataRepoReference)
-      .workspaceId(workspaceId)
+    new DataRepoSnapshotResource()
+      .attributes(dataRepoReference)
+      .metadata(
+        new ResourceMetadata()
+          .name(name)
+          .cloningInstructions(cloningInstructionsEnum)
+          .workspaceId(workspaceId)
+          .resourceId(referenceId)
+      )
   }
 
   val defaultTables: List[TableModel] = List(
@@ -93,13 +94,13 @@ trait DataRepoEntityProviderSpecSupport {
       .columns(List("integer-field", "boolean-field", "timestamp-field").map(new ColumnModel().name(_)).asJava),
     new TableModel().name("table2").primaryKey(List("table2PK").asJava).rowCount(123)
       .columns(List("col2a", "col2b").map(new ColumnModel().name(_)).asJava),
-    new TableModel().name("table3").primaryKey(List("compound","pk").asJava).rowCount(456)
+    new TableModel().name("table3").primaryKey(List("compound", "pk").asJava).rowCount(456)
       .columns(List("col3.1", "col3.2").map(new ColumnModel().name(_)).asJava)
   )
 
   /* A "factory" method to create SnapshotModel objects, with default.
    */
-  def createSnapshotModel( tables: List[TableModel] = defaultTables, relationships: List[RelationshipModel] = List.empty): SnapshotModel =
+  def createSnapshotModel(tables: List[TableModel] = defaultTables, relationships: List[RelationshipModel] = List.empty): SnapshotModel =
     new SnapshotModel()
       .tables(tables.asJava)
       .relationships(relationships.asJava)
@@ -108,10 +109,10 @@ trait DataRepoEntityProviderSpecSupport {
       .relationships(relationships.asJava)
 
   /**
-   * Mock for WorkspaceManagerDAO that allows the caller to specify behavior for the getDataReferenceByName method.
-   */
-  class SpecWorkspaceManagerDAO(refByNameResponse:Either[Throwable, DataReferenceDescription]) extends MockWorkspaceManagerDAO {
-    override def getDataReferenceByName(workspaceId: UUID, refType: ReferenceTypeEnum, refName: DataReferenceName, accessToken: OAuth2BearerToken): DataReferenceDescription =
+    * Mock for WorkspaceManagerDAO that allows the caller to specify behavior for the getDataReferenceByName method.
+    */
+  class SpecWorkspaceManagerDAO(refByNameResponse: Either[Throwable, DataRepoSnapshotResource]) extends MockWorkspaceManagerDAO {
+    override def getDataRepoSnapshotReferenceByName(workspaceId: UUID, refName: DataReferenceName, accessToken: OAuth2BearerToken): DataRepoSnapshotResource =
       refByNameResponse match {
         case Left(t) => throw t
         case Right(ref) =>
@@ -123,10 +124,10 @@ trait DataRepoEntityProviderSpecSupport {
   }
 
   /**
-   * Mock for DataRepoDAO that allows the caller to specify behavior for the getSnapshot and getBaseURL methods.
-   *  method.
-   */
-  class SpecDataRepoDAO(getSnapshotResponse:Either[Throwable, SnapshotModel], baseURL: String = dataRepoInstanceName) extends MockDataRepoDAO {
+    * Mock for DataRepoDAO that allows the caller to specify behavior for the getSnapshot and getBaseURL methods.
+    * method.
+    */
+  class SpecDataRepoDAO(getSnapshotResponse: Either[Throwable, SnapshotModel], baseURL: String = dataRepoInstanceName) extends MockDataRepoDAO {
 
     override def getInstanceName: String = baseURL
 
@@ -137,9 +138,9 @@ trait DataRepoEntityProviderSpecSupport {
   }
 
   /**
-   * Mock for DataRepoDAO that allows the caller to specify behavior for the getSnapshot and getBaseURL methods.
-   *  method.
-   */
+    * Mock for DataRepoDAO that allows the caller to specify behavior for the getSnapshot and getBaseURL methods.
+    * method.
+    */
   class SpecSamDAO(dataSource: SlickDataSource = slickDataSource,
                    petKeyForUserResponse: Either[Throwable, String]) extends MockSamDAO(dataSource) {
     override def getPetServiceAccountKeyForUser(googleProject: GoogleProjectId, userEmail: RawlsUserEmail): Future[String] = {

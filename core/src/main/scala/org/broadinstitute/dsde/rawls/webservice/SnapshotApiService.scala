@@ -23,14 +23,14 @@ trait SnapshotApiService extends UserInfoDirectives {
       post {
         entity(as[NamedDataRepoSnapshot]) { namedDataRepoSnapshot =>
           complete {
-            snapshotServiceConstructor(userInfo).createSnapshot(WorkspaceName(workspaceNamespace, workspaceName), namedDataRepoSnapshot).map(StatusCodes.Created -> _)
+            snapshotServiceConstructor(userInfo).createSnapshot(WorkspaceName(workspaceNamespace, workspaceName), namedDataRepoSnapshot).map(snap => StatusCodes.Created -> snapshotResourceToReferenceDescription(snap))
           }
         }
       } ~
       get {
         parameters("offset".as[Int], "limit".as[Int]) { (offset, limit) =>
           complete {
-            snapshotServiceConstructor(userInfo).enumerateSnapshots(WorkspaceName(workspaceNamespace, workspaceName), offset, limit).map(StatusCodes.OK -> _)
+            snapshotServiceConstructor(userInfo).enumerateSnapshots(WorkspaceName(workspaceNamespace, workspaceName), offset, limit).map(snapList => StatusCodes.OK -> resourceListToReferenceList(snapList))
           }
         }
       }
@@ -38,7 +38,7 @@ trait SnapshotApiService extends UserInfoDirectives {
     path("workspaces" / Segment / Segment / "snapshots" / Segment) { (workspaceNamespace, workspaceName, snapshotId) =>
       get {
         complete {
-          snapshotServiceConstructor(userInfo).getSnapshot(WorkspaceName(workspaceNamespace, workspaceName), snapshotId).map(StatusCodes.OK -> _)
+          snapshotServiceConstructor(userInfo).getSnapshot(WorkspaceName(workspaceNamespace, workspaceName), snapshotId).map(snap => StatusCodes.OK -> snapshotResourceToReferenceDescription(snap))
         }
       } ~
       patch {

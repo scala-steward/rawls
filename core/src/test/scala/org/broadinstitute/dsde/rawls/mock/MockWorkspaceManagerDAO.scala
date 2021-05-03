@@ -15,13 +15,13 @@ import scala.collection.concurrent.TrieMap
 
 class MockWorkspaceManagerDAO extends WorkspaceManagerDAO {
 
-  val references: TrieMap[(UUID, UUID), DataReferenceDescription] = TrieMap()
+  val references: TrieMap[(UUID, UUID), DataRepoSnapshotResource] = TrieMap()
 
   def mockGetWorkspaceResponse(workspaceId: UUID) = new WorkspaceDescription().id(workspaceId)
   def mockCreateWorkspaceResponse(workspaceId: UUID) = new CreatedWorkspace().id(workspaceId)
   def mockReferenceResponse(workspaceId: UUID, referenceId: UUID) = references.getOrElse((workspaceId, referenceId), throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.NotFound, "Not found")))
-  def mockEnumerateReferenceResponse(workspaceId: UUID) = new DataReferenceList().resources(references.collect {
-    case ((wsId, _), refDescription) if wsId == workspaceId => refDescription
+  def mockEnumerateReferenceResponse(workspaceId: UUID) = new ResourceList().resources(references.collect {
+    case ((wsId, _), refDescription) if wsId == workspaceId => new ResourceDescription().metadata(refDescription.getMetadata).resourceAttributes(new ResourceAttributesUnion().gcpDataRepoSnapshot(refDescription.getAttributes))
   }.toList.asJava)
 
   override def getWorkspace(workspaceId: UUID, accessToken: OAuth2BearerToken): WorkspaceDescription = mockGetWorkspaceResponse(workspaceId)
@@ -30,51 +30,52 @@ class MockWorkspaceManagerDAO extends WorkspaceManagerDAO {
 
   override def deleteWorkspace(workspaceId: UUID, accessToken: OAuth2BearerToken): Unit = ()
 
-  override def createDataReference(workspaceId: UUID, name: DataReferenceName, description: Option[DataReferenceDescriptionField], referenceType: ReferenceTypeEnum, reference: DataRepoSnapshot, cloningInstructions: CloningInstructionsEnum, accessToken: OAuth2BearerToken): DataReferenceDescription = {
+  override def createDataRepoSnapshotReference(workspaceId: UUID, name: DataReferenceName, description: Option[DataReferenceDescriptionField], referenceType: ReferenceTypeEnum, reference: DataRepoSnapshotAttributes, cloningInstructions: CloningInstructionsEnum, accessToken: OAuth2BearerToken): DataRepoSnapshotResource = {
     if(reference.toString.contains("fakesnapshot"))
       throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.NotFound, "Not found"))
     else {
       val newId = UUID.randomUUID()
-      val ref = new DataReferenceDescription().referenceId(newId).name(name.value).workspaceId(workspaceId).referenceType(referenceType).reference(reference).cloningInstructions(CloningInstructionsEnum.NOTHING)
-      description.map(d => ref.description(d.value))
+      val snapshotMetadata = new ResourceMetadata().name(name.value).workspaceId(workspaceId).cloningInstructions(CloningInstructionsEnum.NOTHING)
+      description.map(d => snapshotMetadata.description(d.value))
+      val ref = new DataRepoSnapshotResource().metadata(snapshotMetadata).attributes(new DataRepoSnapshotAttributes().snapshot(newId.toString))
       references.put((workspaceId, newId), ref)
       mockReferenceResponse(workspaceId, newId)
     }
   }
 
-  override def getDataReference(workspaceId: UUID, referenceId: UUID, accessToken: OAuth2BearerToken): DataReferenceDescription = {
+  override def getDataRepoSnapshotReference(workspaceId: UUID, referenceId: UUID, accessToken: OAuth2BearerToken): DataRepoSnapshotResource = {
     mockReferenceResponse(workspaceId, referenceId)
   }
 
-  override def getDataReferenceByName(workspaceId: UUID, refType: ReferenceTypeEnum, refName: DataReferenceName, accessToken: OAuth2BearerToken): DataReferenceDescription = {
+  override def getDataRepoSnapshotReferenceByName(workspaceId: UUID, refName: DataReferenceName, accessToken: OAuth2BearerToken): DataRepoSnapshotResource = {
     this.references.find {
-      case ((workspaceUUID, _), ref) => workspaceUUID == workspaceId && ref.getName == refName.value && ref.getReferenceType == refType
-    }.getOrElse(throw new ApiException(StatusCodes.NotFound.intValue, s"$refType/$refName not found in workspace $workspaceId"))._2
+      case ((workspaceUUID, _), ref) => workspaceUUID == workspaceId && ref.getMetadata.getName == refName.value
+    }.getOrElse(throw new ApiException(StatusCodes.NotFound.intValue, s"$refName not found in workspace $workspaceId"))._2
   }
 
-  override def enumerateDataReferences(workspaceId: UUID, offset: Int, limit: Int, accessToken: OAuth2BearerToken): DataReferenceList = {
+  override def enumerateDataRepoSnapshotReferences(workspaceId: UUID, offset: Int, limit: Int, accessToken: OAuth2BearerToken): ResourceList = {
     mockEnumerateReferenceResponse(workspaceId)
   }
 
-  override def updateDataReference(workspaceId: UUID, referenceId: UUID, updateInfo: UpdateDataReferenceRequestBody, accessToken: OAuth2BearerToken): Unit = {
+  override def updateDataRepoSnapshotReference(workspaceId: UUID, referenceId: UUID, updateInfo: UpdateDataReferenceRequestBody, accessToken: OAuth2BearerToken): Unit = {
     if (references.contains(workspaceId, referenceId)) {
       val existingRef = references.get(workspaceId, referenceId).get
-      references.update((workspaceId, referenceId), existingRef.name(
-        if (updateInfo.getName != null) updateInfo.getName else existingRef.getName
+      references.update((workspaceId, referenceId), existingRef.metadata(existingRef.getMetadata.name(
+        if (updateInfo.getName != null) updateInfo.getName else existingRef.getMetadata.getName
       ).description(
-        if (updateInfo.getDescription != null) updateInfo.getDescription else existingRef.getDescription
-      ))
+        if (updateInfo.getDescription != null) updateInfo.getDescription else existingRef.getMetadata.getDescription
+      )))
     }
   }
 
-  override def deleteDataReference(workspaceId: UUID, referenceId: UUID, accessToken: OAuth2BearerToken): Unit = {
+  override def deleteDataRepoSnapshotReference(workspaceId: UUID, referenceId: UUID, accessToken: OAuth2BearerToken): Unit = {
     if (references.contains(workspaceId, referenceId))
       references -= ((workspaceId, referenceId))
   }
 
-  override def createBigQueryDatasetReference(workspaceId: UUID, metadata: DataReferenceRequestMetadata, dataset: GoogleBigQueryDatasetUid, accessToken: OAuth2BearerToken): BigQueryDatasetReference = new BigQueryDatasetReference
+  override def createBigQueryDatasetReference(workspaceId: UUID, metadata: ReferenceResourceCommonFields, dataset: GcpBigQueryDatasetAttributes, accessToken: OAuth2BearerToken): GcpBigQueryDatasetResource = new GcpBigQueryDatasetResource
 
   override def deleteBigQueryDatasetReference(workspaceId: UUID, resourceId: UUID, accessToken: OAuth2BearerToken): Unit = ()
 
-  override def getBigQueryDatasetReferenceByName(workspaceId: UUID, name: String, accessToken: OAuth2BearerToken): BigQueryDatasetReference = new BigQueryDatasetReference().metadata(new DataReferenceMetadata().referenceId(UUID.randomUUID())).dataset(new GoogleBigQueryDatasetUid)
+  override def getBigQueryDatasetReferenceByName(workspaceId: UUID, name: String, accessToken: OAuth2BearerToken): GcpBigQueryDatasetResource = new GcpBigQueryDatasetResource().metadata(new ResourceMetadata().resourceId(UUID.randomUUID())).attributes(new GcpBigQueryDatasetAttributes())
 }
