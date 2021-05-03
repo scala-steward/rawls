@@ -35,7 +35,7 @@ class MockWorkspaceManagerDAO extends WorkspaceManagerDAO {
       throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.NotFound, "Not found"))
     else {
       val newId = UUID.randomUUID()
-      val snapshotMetadata = new ResourceMetadata().name(name.value).workspaceId(workspaceId).cloningInstructions(CloningInstructionsEnum.NOTHING)
+      val snapshotMetadata = new ResourceMetadata().resourceId(newId).name(name.value).workspaceId(workspaceId).cloningInstructions(CloningInstructionsEnum.NOTHING)
       description.map(d => snapshotMetadata.description(d.value))
       val ref = new DataRepoSnapshotResource().metadata(snapshotMetadata).attributes(new DataRepoSnapshotAttributes().snapshot(newId.toString))
       references.put((workspaceId, newId), ref)
