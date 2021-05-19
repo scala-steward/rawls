@@ -2,7 +2,6 @@ package org.broadinstitute.dsde.rawls.workspace
 
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-
 import akka.actor.PoisonPill
 import akka.http.scaladsl.model.headers.OAuth2BearerToken
 import org.broadinstitute.dsde.rawls.dataaccess._
@@ -33,7 +32,7 @@ import org.broadinstitute.dsde.rawls.deltalayer.MockDeltaLayerWriter
 import org.broadinstitute.dsde.rawls.entities.EntityManager
 import org.broadinstitute.dsde.workbench.model.WorkbenchEmail
 import org.mockito.ArgumentMatchers._
-import org.mockito.Mockito
+import org.mockito.{ArgumentMatchers, Mockito}
 import org.mockito.Mockito.{RETURNS_SMART_NULLS, verify}
 import org.scalatest.prop.TableDrivenPropertyChecks
 
@@ -84,7 +83,7 @@ class WorkspaceServiceSpec extends AnyFlatSpec with ScalatestRouteTest with Matc
     val submissionTimeout = FiniteDuration(1, TimeUnit.MINUTES)
 
     val gcsDAO: MockGoogleServicesDAO = new MockGoogleServicesDAO("test")
-    val samDAO = new MockSamDAO(dataSource)
+    val samDAO = Mockito.spy(new MockSamDAO(dataSource))
     val gpsDAO = new MockGooglePubSubDAO
     val workspaceManagerDAO = mock[MockWorkspaceManagerDAO](RETURNS_SMART_NULLS)
     val dataRepoDAO: DataRepoDAO = new MockDataRepoDAO()
@@ -576,6 +575,23 @@ class WorkspaceServiceSpec extends AnyFlatSpec with ScalatestRouteTest with Matc
     }
 
 
+  }
+
+  it should "delete the Workspace Resource from Sam when deleting a Workspace in Rawls" in withTestDataServices { services =>
+    //check that the workspace to be deleted exists
+    val workspace = runAndWait(workspaceQuery.findByName(testData.wsName3)).
+      getOrElse(fail("Cannot proceed to test Workspace deletion because Workspace does not exist"))
+
+    //delete the workspace
+    Await.result(services.workspaceService.deleteWorkspace(testData.wsName3), Duration.Inf)
+
+    // SamResourceTypeNames.workspace, workspaceContext.workspaceIdAsUUID.toString, userInfo
+    verify(services.samDAO, Mockito.times(1)).deleteResource(ArgumentMatchers.eq(SamResourceTypeNames.workspace), ArgumentMatchers.eq(workspace.workspaceIdAsUUID.toString), any[UserInfo])
+
+    //check that the workspace has been deleted
+    assertResult(None) {
+      runAndWait(workspaceQuery.findByName(testData.wsName3))
+    }
   }
 
   it should "delete a workspace with succeeded submission" in withTestDataServices { services =>
