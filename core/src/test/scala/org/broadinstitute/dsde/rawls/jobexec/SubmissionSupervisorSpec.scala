@@ -7,8 +7,9 @@ import akka.stream.ActorMaterializer
 import akka.testkit.TestKit
 import org.broadinstitute.dsde.rawls.RawlsTestUtils
 import org.broadinstitute.dsde.rawls.coordination.UncoordinatedDataSourceAccess
-import org.broadinstitute.dsde.rawls.dataaccess.{HttpSamDAO, MockExecutionServiceDAO, MockGoogleServicesDAO, MockShardedExecutionServiceCluster}
+import org.broadinstitute.dsde.rawls.dataaccess.{HttpSamDAO, MockExecutionServiceDAO, MockGoogleServicesDAO, MockShardedExecutionServiceCluster, PubSubNotificationDAO}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.TestDriverComponent
+import org.broadinstitute.dsde.rawls.google.MockGooglePubSubDAO
 import org.broadinstitute.dsde.rawls.jobexec.SubmissionSupervisor.{RefreshGlobalJobExecGauges, SaveCurrentWorkflowStatusCounts, SubmissionStarted}
 import org.broadinstitute.dsde.rawls.metrics.RawlsStatsDTestUtils
 import org.broadinstitute.dsde.rawls.mock.RemoteServicesMockServer
@@ -33,6 +34,8 @@ class SubmissionSupervisorSpec extends TestKit(ActorSystem("SubmissionSupervisor
   val mockServer = RemoteServicesMockServer()
   val gcsDAO = new MockGoogleServicesDAO("test")
   val mockSamDAO = new HttpSamDAO(mockServer.mockServerBaseUrl, gcsDAO.getPreparedMockGoogleCredential())
+  val gpsDAO = new MockGooglePubSubDAO
+  val mockNotificationDAO = new PubSubNotificationDAO(gpsDAO, "test-notification-topic")
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -53,6 +56,7 @@ class SubmissionSupervisorSpec extends TestKit(ActorSystem("SubmissionSupervisor
       execCluster,
       new UncoordinatedDataSourceAccess(slickDataSource),
       mockSamDAO,
+      mockNotificationDAO,
       gcsDAO,
       gcsDAO.getBucketServiceAccountCredential,
       config,

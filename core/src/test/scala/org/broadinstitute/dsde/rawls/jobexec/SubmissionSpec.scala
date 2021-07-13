@@ -296,10 +296,13 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
       val gcsDAO: MockGoogleServicesDAO = new MockGoogleServicesDAO("test")
       val samDAO = new MockSamDAO(dataSource)
       val gpsDAO = new MockGooglePubSubDAO
+      val notificationDAO = new PubSubNotificationDAO(gpsDAO, "test-notification-topic")
+
       val submissionSupervisor = system.actorOf(SubmissionSupervisor.props(
         execServiceCluster,
         new UncoordinatedDataSourceAccess(slickDataSource),
         samDAO,
+        notificationDAO,
         gcsDAO,
         gcsDAO.getBucketServiceAccountCredential,
         config,
@@ -310,7 +313,6 @@ class SubmissionSpec(_system: ActorSystem) extends TestKit(_system)
 
       val testConf = ConfigFactory.load()
 
-      val notificationDAO = new PubSubNotificationDAO(gpsDAO, "test-notification-topic")
 
       val userServiceConstructor = UserService.constructor(
         slickDataSource,

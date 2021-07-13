@@ -18,7 +18,8 @@ class NotificationsSpec extends AnyFlatSpec with Matchers {
     "WorkspaceRemovedNotification" -> Notifications.WorkspaceRemovedNotification(RawlsUserSubjectId("123456789876543212346"), "READER", WorkspaceName("namespace", "name"), RawlsUserSubjectId("123456789876543212347")),
     "WorkspaceInvitedNotification" -> Notifications.WorkspaceInvitedNotification(RawlsUserEmail("foo@bar.com"), RawlsUserSubjectId("123456789876543212347"), WorkspaceName("namespace", "name"), "test-bucket-name"),
     "WorkspaceChangedNotification" -> Notifications.WorkspaceChangedNotification(RawlsUserSubjectId("123456789876543212346"), WorkspaceName("namespace", "name")),
-    "GroupAccessRequestNotification" -> Notifications.GroupAccessRequestNotification(RawlsUserSubjectId("123456789876543212346"), "my-group", Set(RawlsUserSubjectId("223456789876543212346")), RawlsUserSubjectId("123456789876543212347"))
+    "GroupAccessRequestNotification" -> Notifications.GroupAccessRequestNotification(RawlsUserSubjectId("123456789876543212346"), "my-group", Set(RawlsUserSubjectId("223456789876543212346")), RawlsUserSubjectId("123456789876543212347")),
+    "SubmissionCompletedNotification" -> Notifications.SubmissionCompletedNotification(RawlsUserEmail("foo@bar.com"), WorkspaceName("namespace", "name"), "fake-submission-id", "fake-terminal-status")
   )
 
   Notifications.allNotificationTypes.foreach { case (notificationTypeString, notificationType) =>
@@ -29,7 +30,7 @@ class NotificationsSpec extends AnyFlatSpec with Matchers {
       assertResult(Seq(JsString(notificationTypeString))) {
         json.asJsObject.getFields("notificationType")
       }
-      
+
       assertResult(testsNotification) {
         Notifications.NotificationFormat.read(json)
       }

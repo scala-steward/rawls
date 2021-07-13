@@ -34,13 +34,13 @@ object SubmissionMonitorActor {
             submissionId: UUID,
             datasource: DataSourceAccess,
             samDAO: SamDAO,
+            notificationDAO: PubSubNotificationDAO,
             googleServicesDAO: GoogleServicesDAO,
-            notificationDAO: NotificationDAO,
             executionServiceCluster: ExecutionServiceCluster,
             credential: Credential,
             config: SubmissionMonitorConfig,
             workbenchMetricBaseName: String): Props = {
-    Props(new SubmissionMonitorActor(workspaceName, submissionId, datasource, samDAO, googleServicesDAO, notificationDAO, executionServiceCluster, credential, config, workbenchMetricBaseName))
+    Props(new SubmissionMonitorActor(workspaceName, submissionId, datasource, samDAO, notificationDAO, googleServicesDAO, executionServiceCluster, credential, config, workbenchMetricBaseName))
   }
 
   sealed trait SubmissionMonitorMessage
@@ -74,8 +74,8 @@ class SubmissionMonitorActor(val workspaceName: WorkspaceName,
                              val submissionId: UUID,
                              val datasource: DataSourceAccess,
                              val samDAO: SamDAO,
+                             val notificationDAO: PubSubNotificationDAO,
                              val googleServicesDAO: GoogleServicesDAO,
-                             val notificationDAO: NotificationDAO,
                              val executionServiceCluster: ExecutionServiceCluster,
                              val credential: Credential,
                              val config: SubmissionMonitorConfig,
@@ -136,8 +136,8 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging with RawlsInstrum
   val submissionId: UUID
   val datasource: DataSourceAccess
   val samDAO: SamDAO
+  val notificationDAO: PubSubNotificationDAO
   val googleServicesDAO: GoogleServicesDAO
-  val notificationDAO: NotificationDAO
   val executionServiceCluster: ExecutionServiceCluster
   val credential: Credential
   val config: SubmissionMonitorConfig

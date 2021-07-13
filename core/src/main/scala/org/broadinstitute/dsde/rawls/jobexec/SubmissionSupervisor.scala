@@ -46,8 +46,8 @@ object SubmissionSupervisor {
   def props(executionServiceCluster: ExecutionServiceCluster,
             datasource: DataSourceAccess,
             samDAO: SamDAO,
+            notificationDAO: PubSubNotificationDAO,
             googleServicesDAO: GoogleServicesDAO,
-            notificationDAO: NotificationDAO,
             bucketCredential: Credential,
             submissionMonitorConfig: SubmissionMonitorConfig,
             workbenchMetricBaseName: String): Props = {
@@ -67,7 +67,7 @@ class SubmissionSupervisor(executionServiceCluster: ExecutionServiceCluster,
                            datasource: DataSourceAccess,
                            samDAO: SamDAO,
                            googleServicesDAO: GoogleServicesDAO,
-                           notificationDAO: NotificationDAO,
+                           notificationDAO: PubSubNotificationDAO,
                            bucketCredential: Credential,
                            submissionMonitorConfig: SubmissionMonitorConfig,
                            override val workbenchMetricBaseName: String) extends Actor with LazyLogging with RawlsInstrumented {
@@ -154,7 +154,7 @@ class SubmissionSupervisor(executionServiceCluster: ExecutionServiceCluster,
   }
 
   private def startSubmissionMonitor(workspaceName: WorkspaceName, submissionId: UUID, credential: Credential): ActorRef = {
-    actorOf(SubmissionMonitorActor.props(workspaceName, submissionId, datasource, samDAO, googleServicesDAO, notificationDAO, executionServiceCluster, credential, submissionMonitorConfig, workbenchMetricBaseName).withDispatcher("submission-monitor-dispatcher"), submissionId.toString)
+    actorOf(SubmissionMonitorActor.props(workspaceName, submissionId, datasource, samDAO, notificationDAO, googleServicesDAO, executionServiceCluster, credential, submissionMonitorConfig, workbenchMetricBaseName).withDispatcher("submission-monitor-dispatcher"), submissionId.toString)
   }
 
   private def scheduleNextCheckCurrentWorkflowStatus(actor: ActorRef): Cancellable = {

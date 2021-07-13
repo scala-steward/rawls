@@ -99,6 +99,7 @@ class WorkspaceServiceSpec extends AnyFlatSpec with ScalatestRouteTest with Matc
       executionServiceCluster,
       new UncoordinatedDataSourceAccess(slickDataSource),
       samDAO,
+      notificationDAO,
       gcsDAO,
       gcsDAO.getBucketServiceAccountCredential,
       SubmissionMonitorConfig(1 second, true, 20000),

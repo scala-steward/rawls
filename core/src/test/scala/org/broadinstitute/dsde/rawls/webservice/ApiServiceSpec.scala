@@ -135,6 +135,7 @@ trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with Raw
       executionServiceCluster,
       new UncoordinatedDataSourceAccess(slickDataSource),
       samDAO,
+      notificationDAO,
       gcsDAO,
       gcsDAO.getBucketServiceAccountCredential,
       config,
