@@ -35,11 +35,12 @@ object SubmissionMonitorActor {
             datasource: DataSourceAccess,
             samDAO: SamDAO,
             googleServicesDAO: GoogleServicesDAO,
+            notificationDAO: NotificationDAO,
             executionServiceCluster: ExecutionServiceCluster,
             credential: Credential,
             config: SubmissionMonitorConfig,
             workbenchMetricBaseName: String): Props = {
-    Props(new SubmissionMonitorActor(workspaceName, submissionId, datasource, samDAO, googleServicesDAO, executionServiceCluster, credential, config, workbenchMetricBaseName))
+    Props(new SubmissionMonitorActor(workspaceName, submissionId, datasource, samDAO, googleServicesDAO, notificationDAO, executionServiceCluster, credential, config, workbenchMetricBaseName))
   }
 
   sealed trait SubmissionMonitorMessage
@@ -74,6 +75,7 @@ class SubmissionMonitorActor(val workspaceName: WorkspaceName,
                              val datasource: DataSourceAccess,
                              val samDAO: SamDAO,
                              val googleServicesDAO: GoogleServicesDAO,
+                             val notificationDAO: NotificationDAO,
                              val executionServiceCluster: ExecutionServiceCluster,
                              val credential: Credential,
                              val config: SubmissionMonitorConfig,
@@ -135,6 +137,7 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging with RawlsInstrum
   val datasource: DataSourceAccess
   val samDAO: SamDAO
   val googleServicesDAO: GoogleServicesDAO
+  val notificationDAO: NotificationDAO
   val executionServiceCluster: ExecutionServiceCluster
   val credential: Credential
   val config: SubmissionMonitorConfig
@@ -364,10 +367,14 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging with RawlsInstrum
   def updateSubmissionStatus(dataAccess: DataAccess)(implicit executionContext: ExecutionContext): ReadWriteAction[Boolean] = {
     dataAccess.workflowQuery.listWorkflowRecsForSubmissionAndStatuses(submissionId, (WorkflowStatuses.queuedStatuses ++ WorkflowStatuses.runningStatuses):_*) flatMap { workflowRecs =>
       if (workflowRecs.isEmpty) {
-        dataAccess.submissionQuery.findById(submissionId).map(_.status).result.head.map { status =>
+        // submitterId is email address of submitter
+        dataAccess.submissionQuery.findById(submissionId).map(rec => (rec.status, rec.submitterId)).result.head.map { case (status, submitterId) =>
           SubmissionStatuses.withName(status) match {
             case SubmissionStatuses.Aborting => SubmissionStatuses.Aborted
-            case _ => SubmissionStatuses.Done
+            case _ => {
+              notificationDAO.fireAndForgetNotification(Notifications.SubmissionCompletedNotification(RawlsUserEmail(submitterId), workspaceName, submissionId.toString, status))
+              SubmissionStatuses.Done
+            }
           }
         } flatMap { newStatus =>
           logger.debug(s"submission $submissionId terminating to status $newStatus")

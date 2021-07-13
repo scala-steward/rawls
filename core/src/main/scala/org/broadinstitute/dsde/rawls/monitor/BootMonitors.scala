@@ -32,6 +32,7 @@ object BootMonitors extends LazyLogging {
                    slickDataSource: SlickDataSource,
                    gcsDAO: GoogleServicesDAO,
                    samDAO: SamDAO,
+                   notificationDAO: NotificationDAO,
                    pubSubDAO: GooglePubSubDAO,
                    importServicePubSubDAO: GooglePubSubDAO,
                    importServiceDAO: HttpImportServiceDAO,
@@ -72,6 +73,7 @@ object BootMonitors extends LazyLogging {
       dataSourceAccess,
       samDAO,
       gcsDAO,
+      notificationDAO,
       shardedExecutionServiceCluster,
       metricsPrefix
     )
@@ -145,6 +147,7 @@ object BootMonitors extends LazyLogging {
                                                storeAccess: DataSourceAccess,
                                                samDAO: SamDAO,
                                                gcsDAO: GoogleServicesDAO,
+                                               notificationDAO: NotificationDAO,
                                                shardedExecutionServiceCluster: ExecutionServiceCluster,
                                                metricsPrefix: String) = {
     system.actorOf(SubmissionSupervisor.props(
@@ -152,6 +155,7 @@ object BootMonitors extends LazyLogging {
       storeAccess,
       samDAO,
       gcsDAO,
+      notificationDAO: NotificationDAO,
       gcsDAO.getBucketServiceAccountCredential,
       submissionMonitorConfig,
       workbenchMetricBaseName = metricsPrefix

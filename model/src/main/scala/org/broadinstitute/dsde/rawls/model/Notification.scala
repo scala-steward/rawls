@@ -1,7 +1,10 @@
 package org.broadinstitute.dsde.rawls.model
 
+import java.util.UUID
+
 import spray.json.DefaultJsonProtocol._
 import spray.json._
+
 import scala.reflect.runtime.universe._
 import UserModelJsonSupport.{RawlsUserEmailFormat, RawlsUserSubjectIdFormat}
 import WorkspaceJsonSupport.WorkspaceNameFormat
@@ -103,6 +106,14 @@ object Notifications {
   val GroupAccessRequestNotificationType = register(new NotificationType[GroupAccessRequestNotification] {
     override val format = jsonFormat4(GroupAccessRequestNotification)
     override val description = "Group Access Requested"
+  })
+
+  // TODO: use RawlsUserSubjectId instead of email
+  // TODO: type check on submissionID
+  case class SubmissionCompletedNotification(recipientUserEmail: RawlsUserEmail, workspaceName: WorkspaceName, submissionId: String, terminalStatus: String) extends Notification
+  val SubmissionCompletedNotificationType = register(new WorkspaceNotificationType[SubmissionCompletedNotification] {
+    override val format = jsonFormat4(SubmissionCompletedNotification.apply)
+    override val description = "Submission completed"
   })
 
   // IMPORTANT that this comes after all the calls to register
