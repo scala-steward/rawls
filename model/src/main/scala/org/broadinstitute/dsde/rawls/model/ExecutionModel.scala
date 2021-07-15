@@ -75,6 +75,7 @@ case class ExecutionServiceWorkflowOptions(
   google_compute_service_account: String,
   user_service_account_json: String,
   final_workflow_log_dir: String,
+  final_workflow_outputs_dir: String,
   default_runtime_attributes: Option[JsValue],
   read_from_cache: Boolean,
   delete_intermediate_output_files: Boolean,
@@ -388,7 +389,7 @@ class ExecutionJsonSupport extends JsonSupport {
 
   implicit val ExecutionServiceLogsFormat = jsonFormat2(ExecutionServiceLogs)
 
-  implicit val ExecutionServiceWorkflowOptionsFormat = jsonFormat14(ExecutionServiceWorkflowOptions)
+  implicit val ExecutionServiceWorkflowOptionsFormat = jsonFormat15(ExecutionServiceWorkflowOptions)
 
   implicit val ExecutionServiceLabelResponseFormat = jsonFormat2(ExecutionServiceLabelResponse)
 
