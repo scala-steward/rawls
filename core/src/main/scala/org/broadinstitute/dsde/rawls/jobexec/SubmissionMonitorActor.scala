@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.rawls.jobexec
 
-import java.util.UUID
+import java.text.SimpleDateFormat
+import java.util.{Date, UUID}
 
 import akka.actor._
 import akka.pattern._
@@ -369,31 +370,25 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging with RawlsInstrum
     dataAccess.workflowQuery.listWorkflowRecsForSubmissionAndStatuses(submissionId, (WorkflowStatuses.queuedStatuses ++ WorkflowStatuses.runningStatuses):_*) flatMap { workflowRecs =>
       if (workflowRecs.isEmpty) {
         // decide whether the submission succeeded, failed, was aborted, or unknown
-//        val terminalStatus = dataAccess.workflowQuery.countWorkflowsForSubmissionByQueueStatus(submissionId).map { case (status, _) =>
-//            WorkflowStatuses.withName(status) match {
-//              case WorkflowStatuses.Failed => "Failed"
-//              case WorkflowStatuses.Aborted => "Aborted"
-//              case WorkflowStatuses.Unknown => "Unknown"
-//              case _ => "Succeeded"
-//            }
-//        }
-        val terminalStatus = "Succeeded!"
-        val nWorkflows = 1
-        val dateSubmitted = "16 July 2021, 3:00 pm"
-        dataAccess.submissionQuery.findById(submissionId).map(rec => (rec.status, rec.submitterId)).result.head.map { case (status, submitterId) =>
-          SubmissionStatuses.withName(status) match {
-            case SubmissionStatuses.Aborting => SubmissionStatuses.Aborted
-            case _ => {
-              // submitterId is email address of submitter
-              notificationDAO.fireAndForgetNotification(Notifications.SubmissionCompletedNotification(RawlsUserEmail(submitterId),
-                workspaceName, submissionId.toString, nWorkflows, terminalStatus, dateSubmitted))
-              SubmissionStatuses.Done
+        dataAccess.workflowQuery.countWorkflowsForSubmissionByQueueStatus(submissionId) flatMap { statusMap =>
+          val terminalStatusText = statusMap.foldLeft("")((acc, kv) => acc + kv._1 + ": " + kv._2 + " ")
+          val nWorkflows = statusMap.foldLeft(0)((acc, kv) => acc + kv._2)
+          dataAccess.submissionQuery.findById(submissionId).map(rec => (rec.status, rec.submitterId, rec.submissionDate)).result.head.map { case (status, submitterId, submissionDate) =>
+            SubmissionStatuses.withName(status) match {
+              case SubmissionStatuses.Aborting => SubmissionStatuses.Aborted
+              case _ => {
+                val submissionDateFormatted = new SimpleDateFormat("dd MMMMM yyyy HH:mm:ss").format(new Date (submissionDate.getTime))
+                // submitterId is email address of submitter
+                notificationDAO.fireAndForgetNotification(Notifications.SubmissionCompletedNotification(RawlsUserEmail(submitterId),
+                  workspaceName, submissionId.toString, nWorkflows.toString, terminalStatusText, submissionDateFormatted))
+                SubmissionStatuses.Done
+              }
             }
-          }
-        } flatMap { newStatus =>
-          logger.debug(s"submission $submissionId terminating to status $newStatus")
-          dataAccess.submissionQuery.updateStatus(submissionId, newStatus)
-        } map(_ => true)
+          } flatMap { newStatus =>
+            logger.debug(s"submission $submissionId terminating to status $newStatus")
+            dataAccess.submissionQuery.updateStatus(submissionId, newStatus)
+          } map (_ => true)
+        }
       } else {
         DBIO.successful(false)
       }

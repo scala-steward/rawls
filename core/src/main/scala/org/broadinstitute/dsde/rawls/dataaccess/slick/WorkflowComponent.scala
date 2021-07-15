@@ -350,11 +350,6 @@ trait WorkflowComponent {
       findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(statuses.map(_.toString))).result
     }
 
-//    def getUniqueTerminalWorkflowStatuses(submissionId: UUID): ReadAction[String] = {
-////      findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(WorkflowStatuses.terminalStatuses.map(_.toString))).result.map(rec => AttributeString(rec.status))
-//      findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(WorkflowStatuses.terminalStatuses.map(_.toString))).groupBy(_.status).map { case (status) => (status) }.result map { _.toMap }
-//    }
-
     def countWorkflowsForSubmissionByQueueStatus(submissionId: UUID): ReadAction[Map[String, Int]] = {
       val groupedSeq = findWorkflowsBySubmissionId(submissionId).groupBy(_.status).map { case (status, recs) => (status, recs.length) }.result
       groupedSeq.map(_.toMap)
