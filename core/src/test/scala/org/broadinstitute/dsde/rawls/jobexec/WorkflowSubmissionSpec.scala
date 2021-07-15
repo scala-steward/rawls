@@ -243,14 +243,15 @@ class WorkflowSubmissionSpec(_system: ActorSystem) extends TestKit(_system) with
       assertResult(
         Some(
           ExecutionServiceWorkflowOptions(
-            jes_gcs_root = s"gs://${testData.workspace.bucketName}/${testData.submission1.submissionId}",
+            jes_gcs_root = s"gs://${testData.workspace.bucketName}/workflows/${testData.submission1.submissionId}",
             google_project = testData.wsName.namespace,
             account_name = testData.userOwner.userEmail.value,
             google_compute_service_account = "pet-110347448408766049948@broad-dsde-dev.iam.gserviceaccount.com",
             user_service_account_json =
             """{"client_email": "pet-110347448408766049948@broad-dsde-dev.iam.gserviceaccount.com", "client_id": "104493171545941951815"}""",
             final_workflow_log_dir =
-              s"gs://${testData.workspace.bucketName}/${testData.submission1.submissionId}/workflow.logs",
+              s"gs://${testData.workspace.bucketName}/workflows/${testData.submission1.submissionId}/workflow.logs",
+            final_workflow_outputs_dir = s"gs://${testData.workspace.bucketName}/outputs/${testData.submission1.submissionId}",
             default_runtime_attributes = Some(JsObject(Map("zones" -> JsString("us-central-someother")))),
             read_from_cache = false,
             delete_intermediate_output_files = false,

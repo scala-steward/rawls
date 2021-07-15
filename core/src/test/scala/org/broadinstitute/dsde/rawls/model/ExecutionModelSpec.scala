@@ -143,6 +143,7 @@ class ExecutionModelSpec extends AnyFlatSpec with Matchers {
           |  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/pet-110347448408766049948%40broad-dsde-dev.iam.gserviceaccount.com"
           |}""".stripMargin,
       final_workflow_log_dir = "final_workflow_log_dir",
+      final_workflow_outputs_dir = "final_workflow_outputs_dir",
       default_runtime_attributes = None,
       read_from_cache = true,
       delete_intermediate_output_files = true,
