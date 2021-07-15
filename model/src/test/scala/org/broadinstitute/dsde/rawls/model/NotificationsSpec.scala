@@ -19,7 +19,7 @@ class NotificationsSpec extends AnyFlatSpec with Matchers {
     "WorkspaceInvitedNotification" -> Notifications.WorkspaceInvitedNotification(RawlsUserEmail("foo@bar.com"), RawlsUserSubjectId("123456789876543212347"), WorkspaceName("namespace", "name"), "test-bucket-name"),
     "WorkspaceChangedNotification" -> Notifications.WorkspaceChangedNotification(RawlsUserSubjectId("123456789876543212346"), WorkspaceName("namespace", "name")),
     "GroupAccessRequestNotification" -> Notifications.GroupAccessRequestNotification(RawlsUserSubjectId("123456789876543212346"), "my-group", Set(RawlsUserSubjectId("223456789876543212346")), RawlsUserSubjectId("123456789876543212347")),
-    "SubmissionCompletedNotification" -> Notifications.SubmissionCompletedNotification(RawlsUserEmail("foo@bar.com"), WorkspaceName("namespace", "name"), "fake-submission-id", "fake-terminal-status")
+    "SubmissionCompletedNotification" -> Notifications.SubmissionCompletedNotification(RawlsUserEmail("foo@bar.com"), WorkspaceName("namespace", "name"), "fake-submission-id", 1, "fake-terminal-status", "fake submission date")
   )
 
   Notifications.allNotificationTypes.foreach { case (notificationTypeString, notificationType) =>

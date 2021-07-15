@@ -1,6 +1,7 @@
 package org.broadinstitute.dsde.rawls.jobexec
 
 import java.util.UUID
+
 import akka.actor._
 import akka.pattern._
 import com.google.api.client.auth.oauth2.Credential
@@ -16,7 +17,7 @@ import org.broadinstitute.dsde.rawls.jobexec.SubmissionSupervisor.{CheckCurrentW
 import org.broadinstitute.dsde.rawls.metrics.RawlsInstrumented
 import org.broadinstitute.dsde.rawls.model.Attributable.{AttributeMap, attributeCount, safePrint}
 import org.broadinstitute.dsde.rawls.model.SubmissionStatuses.SubmissionStatus
-import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.WorkflowStatus
+import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.{Failed, WorkflowStatus}
 import org.broadinstitute.dsde.rawls.model._
 import org.broadinstitute.dsde.rawls.util.{FutureSupport, addJitter}
 
@@ -367,12 +368,25 @@ trait SubmissionMonitor extends FutureSupport with LazyLogging with RawlsInstrum
   def updateSubmissionStatus(dataAccess: DataAccess)(implicit executionContext: ExecutionContext): ReadWriteAction[Boolean] = {
     dataAccess.workflowQuery.listWorkflowRecsForSubmissionAndStatuses(submissionId, (WorkflowStatuses.queuedStatuses ++ WorkflowStatuses.runningStatuses):_*) flatMap { workflowRecs =>
       if (workflowRecs.isEmpty) {
-        // submitterId is email address of submitter
+        // decide whether the submission succeeded, failed, was aborted, or unknown
+//        val terminalStatus = dataAccess.workflowQuery.countWorkflowsForSubmissionByQueueStatus(submissionId).map { case (status, _) =>
+//            WorkflowStatuses.withName(status) match {
+//              case WorkflowStatuses.Failed => "Failed"
+//              case WorkflowStatuses.Aborted => "Aborted"
+//              case WorkflowStatuses.Unknown => "Unknown"
+//              case _ => "Succeeded"
+//            }
+//        }
+        val terminalStatus = "Succeeded!"
+        val nWorkflows = 1
+        val dateSubmitted = "16 July 2021, 3:00 pm"
         dataAccess.submissionQuery.findById(submissionId).map(rec => (rec.status, rec.submitterId)).result.head.map { case (status, submitterId) =>
           SubmissionStatuses.withName(status) match {
             case SubmissionStatuses.Aborting => SubmissionStatuses.Aborted
             case _ => {
-              notificationDAO.fireAndForgetNotification(Notifications.SubmissionCompletedNotification(RawlsUserEmail(submitterId), workspaceName, submissionId.toString, status))
+              // submitterId is email address of submitter
+              notificationDAO.fireAndForgetNotification(Notifications.SubmissionCompletedNotification(RawlsUserEmail(submitterId),
+                workspaceName, submissionId.toString, nWorkflows, terminalStatus, dateSubmitted))
               SubmissionStatuses.Done
             }
           }

@@ -11,7 +11,7 @@ import nl.grons.metrics4.scala.Counter
 import org.broadinstitute.dsde.rawls.RawlsException
 import org.broadinstitute.dsde.rawls.dataaccess.ExecutionServiceId
 import org.broadinstitute.dsde.rawls.model.SubmissionStatuses.SubmissionStatus
-import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.WorkflowStatus
+import org.broadinstitute.dsde.rawls.model.WorkflowStatuses.{Failed, Succeeded, WorkflowStatus}
 import org.broadinstitute.dsde.rawls.model._
 import org.joda.time.DateTime
 import slick.dbio.Effect.Write
@@ -349,6 +349,11 @@ trait WorkflowComponent {
     def listWorkflowRecsForSubmissionAndStatuses(submissionId: UUID, statuses: WorkflowStatuses.WorkflowStatus*): ReadAction[Seq[WorkflowRecord]] = {
       findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(statuses.map(_.toString))).result
     }
+
+//    def getUniqueTerminalWorkflowStatuses(submissionId: UUID): ReadAction[String] = {
+////      findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(WorkflowStatuses.terminalStatuses.map(_.toString))).result.map(rec => AttributeString(rec.status))
+//      findWorkflowsBySubmissionId(submissionId).filter(_.status inSetBind(WorkflowStatuses.terminalStatuses.map(_.toString))).groupBy(_.status).map { case (status) => (status) }.result map { _.toMap }
+//    }
 
     def countWorkflowsForSubmissionByQueueStatus(submissionId: UUID): ReadAction[Map[String, Int]] = {
       val groupedSeq = findWorkflowsBySubmissionId(submissionId).groupBy(_.status).map { case (status, recs) => (status, recs.length) }.result
