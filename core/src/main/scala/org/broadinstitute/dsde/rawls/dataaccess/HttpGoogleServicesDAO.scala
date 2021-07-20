@@ -921,7 +921,12 @@ class HttpGoogleServicesDAO(
       "projectOwnersGroup" -> ownerGroupEmail.value.toJson,
       "projectViewersGroup" -> computeUserGroupEmail.value.toJson,
       "requesterPaysRole" -> requesterPaysRole.toJson,
-      "highSecurityNetwork" -> highSecurityNetwork.toJson,
+      // DEBUG: begin create an HSN with NAT
+
+      "highSecurityNetwork" -> true.toJson,
+      "cloudNat" -> true.toJson,
+
+      // DEBUG: END create an HSN with NAT
       "enableFlowLogs" -> enableFlowLogs.toJson,
       "privateIpGoogleAccess" -> privateIpGoogleAccess.toJson,
       "fcProjectOwners" -> projectTemplate.owners.toJson,
