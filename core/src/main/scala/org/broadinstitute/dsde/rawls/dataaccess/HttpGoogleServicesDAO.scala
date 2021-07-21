@@ -924,7 +924,6 @@ class HttpGoogleServicesDAO(
       // DEBUG: begin create an HSN with NAT
 
       "highSecurityNetwork" -> true.toJson,
-      "cloudNat" -> true.toJson,
 
       // DEBUG: END create an HSN with NAT
       "enableFlowLogs" -> enableFlowLogs.toJson,
