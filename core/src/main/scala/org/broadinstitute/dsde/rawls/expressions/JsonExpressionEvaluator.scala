@@ -15,8 +15,8 @@ object JsonExpressionEvaluator {
       case _: AttributeEntityReference => Seq(AttributeValueRawJson(jsonExprT.get))
       case _: AttributeEntityReferenceList => Seq(AttributeValueRawJson(jsonExprT.get))
       case AttributeNull => Seq.empty
+      case avl: AttributeValueList => Seq(avl) // avl.list
       case av: AttributeValue => Seq(av)
-      case avl: AttributeValueList => avl.list
       case AttributeValueEmptyList => Seq.empty
 
       //we should never get here, because there's no way to deserialize an empty reference list with the plain array parser

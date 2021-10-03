@@ -27,13 +27,14 @@ object OutputExpression {
       val terraExpressionParser = AntlrTerraExpressionParser.getParser(expr)
       val visitor = new LocalOutputExpressionValidationVisitor(rootEntityTypeOption)
 
-      for {
+      val abc = for {
         parseTree <- Try(terraExpressionParser.root()).recoverWith {
           case regrets: RawlsException =>
             Failure(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadRequest, regrets)))
         }
         boundExprFunc <- visitor.visit(parseTree)
       } yield boundExprFunc(attribute)
+      abc
     }
   }
 }

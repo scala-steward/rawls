@@ -203,6 +203,7 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, dataReference: DataRe
         case AttributeNumber(_) => bigDecimalSize
         case AttributeString(value) => objectSize + stringSize(value)
         case AttributeValueRawJson(value) => objectSize + sizeOfJsValueBytes(value)
+        case AttributeValueList(list) => list.map(sizeOfAttributeValueBytes).sum
       }
     }
 
@@ -379,8 +380,8 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, dataReference: DataRe
             val subFieldValue = struct.getRecordValue.get(columnIndex)
             fieldValueToAttribute(subField, subFieldValue)
           }.flatMap {
-            case v: AttributeValue => Seq(v)
             case AttributeValueList(l) => l
+            case v: AttributeValue => Seq(v)
             case unsupported => throw new RawlsException(s"unsupported attribute: $unsupported")
           }
           AttributeValueList(attributeValues)
@@ -388,8 +389,8 @@ class DataRepoEntityProvider(snapshotModel: SnapshotModel, dataReference: DataRe
 
       val primaryKey: EntityName = resultRow.get(entityNameColumn).getStringValue
       val evaluationResult: Try[Iterable[AttributeValue]] = attribute match {
-        case v: AttributeValue => Success(Seq(v))
         case AttributeValueList(l) => Success(l)
+        case v: AttributeValue => Success(Seq(v))
         case unsupported => Failure(new RawlsException(s"unsupported attribute: $unsupported"))
       }
       (parsedExpression.expression, Map(primaryKey -> evaluationResult))

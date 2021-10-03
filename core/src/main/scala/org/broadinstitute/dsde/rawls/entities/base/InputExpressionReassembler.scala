@@ -4,7 +4,7 @@ import org.antlr.v4.runtime.tree.ParseTree
 import org.broadinstitute.dsde.rawls.entities.base.ExpressionEvaluationSupport.{EntityName, ExpressionAndResult, LookupExpression}
 import org.broadinstitute.dsde.rawls.expressions.JsonExpressionEvaluator
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.ReconstructExpressionVisitor
-import org.broadinstitute.dsde.rawls.model.{AttributeBoolean, AttributeNull, AttributeNumber, AttributeString, AttributeValue, AttributeValueRawJson}
+import org.broadinstitute.dsde.rawls.model.{AttributeBoolean, AttributeNull, AttributeNumber, AttributeString, AttributeValue, AttributeValueList, AttributeValueRawJson}
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsString, JsValue}
 
 import scala.util.{Success, Try}
@@ -71,6 +71,7 @@ object InputExpressionReassembler {
       case AttributeNumber(v) => JsNumber(v)
       case AttributeBoolean(v) => JsBoolean(v)
       case AttributeValueRawJson(v) => v
+      case AttributeValueList(list) => JsArray(list.map(unpackSlickEvaluatedOutput).toVector)
     }
   }
 
