@@ -70,7 +70,7 @@ trait ApiServiceSpec extends TestDriverComponentWithFlatSpecAndMatchers with Raw
 
   // increase the timeout for ScalatestRouteTest from the default of 1 second, otherwise
   // intermittent failures occur on requests not completing in time
-  implicit val routeTestTimeout = RouteTestTimeout(5.seconds)
+  implicit val routeTestTimeout = RouteTestTimeout(5.minutes)
 
   // this gets fed into sealRoute so that exceptions are handled the same in tests as in real life
   implicit val exceptionHandler = RawlsApiService.exceptionHandler

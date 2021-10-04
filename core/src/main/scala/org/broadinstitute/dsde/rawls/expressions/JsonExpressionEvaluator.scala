@@ -15,7 +15,7 @@ object JsonExpressionEvaluator {
       case _: AttributeEntityReference => Seq(AttributeValueRawJson(jsonExprT.get))
       case _: AttributeEntityReferenceList => Seq(AttributeValueRawJson(jsonExprT.get))
       case AttributeNull => Seq.empty
-      case avl: AttributeValueList => Seq(avl) // avl.list
+      case avl: AttributeValueList => avl.list // should this be Seq(avl) ????
       case av: AttributeValue => Seq(av)
       case AttributeValueEmptyList => Seq.empty
 
