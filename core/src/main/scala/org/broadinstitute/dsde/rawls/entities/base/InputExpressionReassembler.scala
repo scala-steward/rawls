@@ -1,12 +1,15 @@
 package org.broadinstitute.dsde.rawls.entities.base
 
+import cromwell.client.model.ValueType.TypeNameEnum
 import org.antlr.v4.runtime.tree.ParseTree
 import org.broadinstitute.dsde.rawls.entities.base.ExpressionEvaluationSupport.{EntityName, ExpressionAndResult, LookupExpression}
 import org.broadinstitute.dsde.rawls.expressions.JsonExpressionEvaluator
 import org.broadinstitute.dsde.rawls.expressions.parser.antlr.ReconstructExpressionVisitor
+import org.broadinstitute.dsde.rawls.jobexec.MethodConfigResolver.MethodInput
 import org.broadinstitute.dsde.rawls.model.{AttributeBoolean, AttributeNull, AttributeNumber, AttributeString, AttributeValue, AttributeValueRawJson}
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsString, JsValue}
 
+import scala.collection.JavaConverters._
 import scala.util.{Success, Try}
 
 object InputExpressionReassembler {
@@ -32,7 +35,8 @@ object InputExpressionReassembler {
     */
   def constructFinalInputValues(lookupExpressionAndResults: Seq[ExpressionAndResult],
                                 parsedInputExpression: ParseTree,
-                                rootEntityNames: Option[Seq[EntityName]]): Map[EntityName, Try[Iterable[AttributeValue]]] = {
+                                rootEntityNames: Option[Seq[EntityName]],
+                                inputOption: Option[MethodInput]): Map[EntityName, Try[Iterable[AttributeValue]]] = {
     // unpack the evaluated AttributeValue to JsValue and transform it into sequence of tuples with entity name as key
     val seqOfEntityToLookupExprAndValue: Seq[(EntityName, (LookupExpression, Try[JsValue]))] = unpackAndTransformEvaluatedOutput(lookupExpressionAndResults)
 
@@ -43,7 +47,7 @@ object InputExpressionReassembler {
     val mapOfEntityToEvaluatedExprMap: Map[EntityName, Try[Map[LookupExpression, JsValue]]] = convertEvaluatedExprSeqToMap(mapOfEntityToSeqOfEvaluatedExpr)
 
     // replace the value for evaluated attribute references in the input expression for each entity name
-    val mapOfEntityToInputExpr: Map[EntityName, Try[JsValue]] = reconstructInputExprForEachEntity(mapOfEntityToEvaluatedExprMap, parsedInputExpression, rootEntityNames)
+    val mapOfEntityToInputExpr: Map[EntityName, Try[JsValue]] = reconstructInputExprForEachEntity(mapOfEntityToEvaluatedExprMap, parsedInputExpression, rootEntityNames, inputOption)
 
     /*
       For each entity name and it's generated expression call JsonExpressionEvaluator to reconstruct the desired return type
@@ -169,13 +173,30 @@ object InputExpressionReassembler {
    */
   private def reconstructInputExprForEachEntity(mapOfEntityToEvaluatedExprMap: Map[EntityName, Try[Map[LookupExpression, JsValue]]],
                                                 parsedTree: ParseTree,
-                                                rootEntityNames: Option[Seq[EntityName]]): Map[EntityName, Try[JsValue]] = {
+                                                rootEntityNames: Option[Seq[EntityName]],
+                                                inputOption: Option[MethodInput]): Map[EntityName, Try[JsValue]] = {
+
+    val arrayInputList: Option[List[String]] = inputOption.map { input =>
+      val inputType = input.workflowInput.getValueType
+      inputType.getTypeName match {
+        case TypeNameEnum.ARRAY =>
+          List.empty[String] // ???
+        case TypeNameEnum.OBJECT =>
+          val objectFields = inputType.getObjectFieldTypes.asScala
+          objectFields.collect {
+            case field if field.getFieldType.getTypeName == TypeNameEnum.ARRAY => field.getFieldName
+          }.toList
+        case _ =>
+          List.empty[String]
+      }
+    }
+
     // when there are no root entities handle as a single root entity with empty string for name
     rootEntityNames.getOrElse(Seq("")).map { entityName =>
       // in the case of literal JSON there are no LookupExpressions
       val evaluatedLookupMapTry = mapOfEntityToEvaluatedExprMap.getOrElse(entityName, Success(Map.empty[LookupExpression, JsValue]))
       val inputExprWithEvaluatedRef = evaluatedLookupMapTry.map { lookupMap =>
-        val visitor = new ReconstructExpressionVisitor(lookupMap)
+        val visitor = new ReconstructExpressionVisitor(lookupMap, arrayInputList)
         visitor.visit(parsedTree)
       }
 

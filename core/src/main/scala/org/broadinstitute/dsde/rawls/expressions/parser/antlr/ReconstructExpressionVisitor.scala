@@ -6,7 +6,7 @@ import spray.json._
 
 import scala.collection.JavaConverters._
 
-class ReconstructExpressionVisitor(lookupMap: Map[String, JsValue]) extends TerraExpressionBaseVisitor[JsValue] {
+class ReconstructExpressionVisitor(lookupMap: Map[String, JsValue], arrayInputList: Option[List[String]]) extends TerraExpressionBaseVisitor[JsValue] {
 
   override def visitRoot(ctx: TerraExpressionParser.RootContext): JsValue = {
     // ROOT rule always has 1 child
@@ -53,7 +53,23 @@ class ReconstructExpressionVisitor(lookupMap: Map[String, JsValue]) extends Terr
     JsArray(ctx.getRuleContexts(classOf[ValueContext]).asScala.map(visit).toVector)
   }
 
-  override def visitLookup(ctx: TerraExpressionParser.LookupContext): JsValue = lookupMap(ctx.getText)
+  override def visitLookup(ctx: TerraExpressionParser.LookupContext): JsValue = {
+    arrayInputList match {
+      case Some(inputList) =>
+        val lookupValue = lookupMap(ctx.getText)
+        if(inputList.contains(ctx.getText)){
+          lookupValue match {
+            case JsBoolean(_) | JsNumber(_) | JsString(_) =>
+              JsArray(lookupValue)
+            case _ =>
+              lookupValue
+          }
+        } else
+          lookupValue
+      case None =>
+        lookupMap(ctx.getText)
+    }
+  }
 
   override def visitValue(ctx: TerraExpressionParser.ValueContext): JsValue = {
     // VALUE rule always has 1 child
