@@ -44,6 +44,9 @@ object Attributable {
   def safePrint(map: AttributeMap, depth: Int = 10): String = {
     def safePrintInner(attr: Attribute): String = {
       attr match {
+        case avl: AttributeValueList =>
+          // This is OK because lists of lists are not supported (see comment in WorkspaceModelSpec.scala)
+          avl.list.take(depth).toString
         case attr: AttributeListElementable => attr.toString
         case attrList: AttributeList[_] =>
           // This is OK because lists of lists are not supported (see comment in WorkspaceModelSpec.scala)
