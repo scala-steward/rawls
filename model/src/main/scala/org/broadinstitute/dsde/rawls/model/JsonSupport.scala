@@ -37,17 +37,12 @@ trait PlainArrayAttributeListSerializer extends AttributeListSerializer {
     case JsArray(a) =>
       val attrList: Seq[Attribute] = a.map(readAttribute)
       attrList match {
-        case e: Seq[_] if e.isEmpty =>
-          AttributeValueEmptyList
-        case v: Seq[AttributeValue @unchecked] if attrList.map(_.isInstanceOf[AttributeValue]).reduce(_&&_) =>
-          AttributeValueList(v)
-        case r: Seq[AttributeEntityReference @unchecked] if attrList.map(_.isInstanceOf[AttributeEntityReference]).reduce(_&&_) =>
-          AttributeEntityReferenceList(r)
-        case _ =>
-          AttributeValueRawJson(json) //heterogeneous array type? ok, we'll treat it as raw json
+        case e: Seq[_] if e.isEmpty => AttributeValueEmptyList
+        case v: Seq[AttributeValue @unchecked] if attrList.map(_.isInstanceOf[AttributeValue]).reduce(_&&_) => AttributeValueList(v)
+        case r: Seq[AttributeEntityReference @unchecked] if attrList.map(_.isInstanceOf[AttributeEntityReference]).reduce(_&&_) => AttributeEntityReferenceList(r)
+        case _ => AttributeValueRawJson(json) //heterogeneous array type? ok, we'll treat it as raw json
       }
-    case _ =>
-      AttributeValueRawJson(json) //something else? ok, we'll treat it as raw json
+    case _ => AttributeValueRawJson(json) //something else? ok, we'll treat it as raw json
   }
 }
 
@@ -71,12 +66,10 @@ trait TypedAttributeListSerializer extends AttributeListSerializer {
   }
 
   def readComplexType(json: JsValue): Attribute = json match {
-    case JsObject(members) if LIST_OBJECT_KEYS subsetOf members.keySet =>
-      readAttributeList(members)
+    case JsObject(members) if LIST_OBJECT_KEYS subsetOf members.keySet => readAttributeList(members)
 
     //in this serializer, [1,2,3] is not the representation for an AttributeValueList, so it's raw json
-    case _ =>
-      AttributeValueRawJson(json)
+    case _ => AttributeValueRawJson(json)
   }
 
   def writeAttributeList[T <: Attribute](listType: String, list: Seq[T]): JsValue = {
@@ -90,20 +83,14 @@ trait TypedAttributeListSerializer extends AttributeListSerializer {
     }
 
     (jsMap(LIST_ITEMS_TYPE_KEY), attrList) match {
-      case (JsString(VALUE_LIST_TYPE), vals: Seq[AttributeValue @unchecked]) if attrList.isEmpty =>
-        AttributeValueEmptyList
-      case (JsString(VALUE_LIST_TYPE), vals: Seq[AttributeValue @unchecked]) if attrList.map(_.isInstanceOf[AttributeValue]).reduce(_&&_) =>
-        AttributeValueList(vals)
+      case (JsString(VALUE_LIST_TYPE), vals: Seq[AttributeValue @unchecked]) if attrList.isEmpty => AttributeValueEmptyList
+      case (JsString(VALUE_LIST_TYPE), vals: Seq[AttributeValue @unchecked]) if attrList.map(_.isInstanceOf[AttributeValue]).reduce(_&&_) => AttributeValueList(vals)
 
-      case (JsString(REF_LIST_TYPE), refs: Seq[AttributeEntityReference @unchecked]) if attrList.isEmpty =>
-        AttributeEntityReferenceEmptyList
-      case (JsString(REF_LIST_TYPE), refs: Seq[AttributeEntityReference @unchecked]) if attrList.map(_.isInstanceOf[AttributeEntityReference]).reduce(_&&_) =>
-        AttributeEntityReferenceList(refs)
+      case (JsString(REF_LIST_TYPE), refs: Seq[AttributeEntityReference @unchecked]) if attrList.isEmpty => AttributeEntityReferenceEmptyList
+      case (JsString(REF_LIST_TYPE), refs: Seq[AttributeEntityReference @unchecked]) if attrList.map(_.isInstanceOf[AttributeEntityReference]).reduce(_&&_) => AttributeEntityReferenceList(refs)
 
-      case (JsString(s), _) if !ALLOWED_LIST_TYPES.contains(s) =>
-        throw new DeserializationException(s"illegal array type: $LIST_ITEMS_TYPE_KEY must be one of ${ALLOWED_LIST_TYPES.mkString(", ")}")
-      case _ =>
-        throw new DeserializationException("illegal array type: array elements don't match array type")
+      case (JsString(s), _) if !ALLOWED_LIST_TYPES.contains(s) => throw new DeserializationException(s"illegal array type: $LIST_ITEMS_TYPE_KEY must be one of ${ALLOWED_LIST_TYPES.mkString(", ")}")
+      case _ => throw new DeserializationException("illegal array type: array elements don't match array type")
     }
   }
 }
@@ -138,24 +125,18 @@ trait AttributeFormat extends RootJsonFormat[Attribute] with AttributeListSerial
 
   override def read(json: JsValue): Attribute = readAttribute(json)
   def readAttribute(json: JsValue): Attribute = json match {
-    case JsNull =>
-      AttributeNull
-    case JsString(s) =>
-      AttributeString(s)
-    case JsBoolean(b) =>
-      AttributeBoolean(b)
-    case JsNumber(n) =>
-      AttributeNumber(n)
+    case JsNull => AttributeNull
+    case JsString(s) => AttributeString(s)
+    case JsBoolean(b) => AttributeBoolean(b)
+    case JsNumber(n) => AttributeNumber(n)
     //NOTE: we handle AttributeValueRawJson in readComplexType below
 
-    case JsObject(members) if ENTITY_OBJECT_KEYS subsetOf members.keySet =>
-      (members(ENTITY_TYPE_KEY), members(ENTITY_NAME_KEY)) match {
+    case JsObject(members) if ENTITY_OBJECT_KEYS subsetOf members.keySet => (members(ENTITY_TYPE_KEY), members(ENTITY_NAME_KEY)) match {
       case (JsString(typeKey), JsString(nameKey)) => AttributeEntityReference(typeKey, nameKey)
       case _ => throw new RawlsException(s"the values for $ENTITY_TYPE_KEY and $ENTITY_NAME_KEY must be strings")
     }
 
-    case _ =>
-      readComplexType(json)
+    case _ => readComplexType(json)
   }
 }
 

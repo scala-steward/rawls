@@ -122,8 +122,7 @@ class EntityService(protected val userInfo: UserInfo, val dataSource: SlickDataS
           ExpressionEvaluator.withNewExpressionEvaluator(dataAccess, Some(entities)) { evaluator =>
             evaluator.evalFinalAttribute(workspaceContext, expression).asTry map { tryValuesByEntity => tryValuesByEntity match {
               //parsing failure
-              case Failure(regret) =>
-                throw new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, regret))
+              case Failure(regret) => throw new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, regret))
               case Success(valuesByEntity) =>
                 if (valuesByEntity.size != 1) {
                   //wrong number of entities?!
@@ -131,13 +130,12 @@ class EntityService(protected val userInfo: UserInfo, val dataSource: SlickDataS
                 } else {
                   assert(valuesByEntity.head._1 == entityName)
                   valuesByEntity.head match {
-                    case (_, Success(result)) =>
-                      result match {
-                        case Seq(avl: AttributeValueList) =>
-                          RequestComplete(StatusCodes.OK, avl.list)
-                        case _ =>
-                          RequestComplete(StatusCodes.OK, result.toSeq)
-                      }
+                    case (_, Success(result)) => result match {
+                      case Seq(avl: AttributeValueList) =>
+                        RequestComplete(StatusCodes.OK, avl.list)
+                      case _ =>
+                        RequestComplete(StatusCodes.OK, result.toSeq)
+                    }
                     case (_, Failure(regret)) =>
                       throw new RawlsExceptionWithErrorReport(errorReport = ErrorReport(StatusCodes.BadRequest, "Unable to evaluate expression '${expression}' on ${entityType}/${entityName} in ${workspaceName}", ErrorReport(regret)))
                   }
