@@ -49,7 +49,7 @@ while [ "$1" != "" ]; do
             MAKE_JAR=true
             ;;
         publish)
-            PUSH_ARTIFACTORY=true
+            PUSH_ARTIFACTORY=false
             ;;
         -d | --docker)
             shift
