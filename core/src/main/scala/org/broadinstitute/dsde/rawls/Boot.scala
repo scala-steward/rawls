@@ -81,6 +81,8 @@ object Boot extends IOApp with LazyLogging {
 
     val changelogParams = Map("gcs:appsDomain" -> gcsConfig.getString("appsDomain"))
 
+    //test change
+
     if(initWithLiquibase) {
       slickDataSource.initWithLiquibase(liquibaseChangeLog, changelogParams)
     }
