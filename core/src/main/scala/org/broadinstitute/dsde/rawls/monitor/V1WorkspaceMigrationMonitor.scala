@@ -140,6 +140,12 @@ object V1WorkspaceMigrationMonitor
         .update((bucketName.value.some, Timestamp.valueOf(LocalDateTime.now).some))
     ))
   }
+
+  // Google project is the project in which the STS job will run and it contains the STS service account that we need to
+  // make sure has the correct permissions on the source and destination buckets.
+  final def setSourceAndDestBucketAcls(sourceBucket: GcsBucketName, destBucket: GcsBucketName, googleProject: GoogleProject) =
+    ???
+
 }
 
 object V1WorkspaceMigrationActor {
