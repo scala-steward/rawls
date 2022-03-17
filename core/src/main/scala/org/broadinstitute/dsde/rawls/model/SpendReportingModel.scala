@@ -1,6 +1,8 @@
 package org.broadinstitute.dsde.rawls.model
 
-import org.broadinstitute.dsde.rawls.RawlsException
+import akka.http.scaladsl.model.StatusCodes
+import com.google.cloud.bigquery.FieldValueList
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.rawls.model.SpendReportingAggregationKeys.SpendReportingAggregationKey
 import org.broadinstitute.dsde.rawls.model.TerraSpendCategories.TerraSpendCategory
 import org.broadinstitute.dsde.workbench.model.google.GoogleModelJsonSupport._
@@ -16,19 +18,19 @@ case class BillingProjectSpendExport(billingProjectName: RawlsBillingProjectName
 
 case class SpendReportingAggregationKeyWithSub(key: SpendReportingAggregationKey, subAggregationKey: Option[SpendReportingAggregationKey] = None)
 
-case class SpendReportingResults(spendDetails: Seq[SpendReportingAggregation], spendSummary: SpendReportingForDateRange)
-case class SpendReportingAggregation(aggregationKey: SpendReportingAggregationKey, spendData: Seq[SpendReportingForDateRange])
-case class SpendReportingForDateRange(
-                                       cost: String,
-                                       credits: String,
-                                       currency: String,
-                                       startTime: Option[DateTime] = None,
-                                       endTime: Option[DateTime] = None,
-                                       workspace: Option[WorkspaceName] = None,
-                                       googleProjectId: Option[GoogleProject] = None,
-                                       category: Option[TerraSpendCategory] = None,
-                                       subAggregation: Option[SpendReportingAggregation] = None
-                                     )
+case class SpendReportingResults(spendDetails: Seq[SpendReportingAggregation], spendSummary: GroupedSpendReportingData)
+case class SpendReportingAggregation(aggregationKey: SpendReportingAggregationKey, spendData: Seq[GroupedSpendReportingData])
+case class GroupedSpendReportingData(
+                                      cost: String,
+                                      credits: String,
+                                      currency: String,
+                                      startTime: Option[DateTime] = None,
+                                      endTime: Option[DateTime] = None,
+                                      workspace: Option[WorkspaceName] = None,
+                                      googleProjectId: Option[GoogleProject] = None,
+                                      category: Option[TerraSpendCategory] = None,
+                                      subAggregation: Option[SpendReportingAggregation] = None
+                                    )
 
 // Key indicating how spendData has been aggregated. Ex. 'workspace' if all data in spendData is for a particular workspace
 object SpendReportingAggregationKeys {
@@ -42,6 +44,12 @@ object SpendReportingAggregationKeys {
 
     def bigQueryAliasClause(): String = s", $bigQueryField as $bigQueryAlias"
     def bigQueryGroupByClause(): String = s", $bigQueryAlias"
+
+    type AggregationType
+    def groupByCriteria(row: FieldValueList): AggregationType
+    def attachAggregatorToGroupedSpend(groupedSpendReportingData: GroupedSpendReportingData,
+                                       aggregator: AggregationType,
+                                       workspaceProjectsToNames: Map[GoogleProject, WorkspaceName] = Map.empty): GroupedSpendReportingData
   }
 
   def withName(name: String): SpendReportingAggregationKey = name.toLowerCase match {
@@ -54,14 +62,55 @@ object SpendReportingAggregationKeys {
   case object Daily extends SpendReportingAggregationKey {
     override val bigQueryField: String = "DATE(_PARTITIONTIME)"
     override val bigQueryAlias: String = "date"
+
+    override type AggregationType = DateTime
+    override def groupByCriteria(row: FieldValueList): DateTime = {
+      DateTime.parse(row.get(bigQueryAlias).getStringValue)
+    }
+
+    override def attachAggregatorToGroupedSpend(groupedSpendReportingData: GroupedSpendReportingData,
+                                                aggregator: DateTime,
+                                                workspaceProjectsToNames: Map[GoogleProject, WorkspaceName] = Map.empty): GroupedSpendReportingData = {
+      groupedSpendReportingData.copy(
+        startTime = Option(aggregator),
+        endTime = Option(aggregator.plusDays(1).minusMillis(1))
+      )
+    }
   }
   case object Workspace extends SpendReportingAggregationKey {
     override val bigQueryField: String = "project.id"
     override val bigQueryAlias: String = "googleProjectId"
+
+    override type AggregationType = GoogleProject
+    override def groupByCriteria(row: FieldValueList): GoogleProject = {
+      GoogleProject(row.get(bigQueryAlias).getStringValue)
+    }
+
+    override def attachAggregatorToGroupedSpend(groupedSpendReportingData: GroupedSpendReportingData,
+                                                aggregator: GoogleProject,
+                                                workspaceProjectsToNames: Map[GoogleProject, WorkspaceName] = Map.empty): GroupedSpendReportingData = {
+      groupedSpendReportingData.copy(
+        googleProjectId = Option(aggregator),
+        workspace = Option(workspaceProjectsToNames.getOrElse(aggregator, throw new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.BadGateway, s"unexpected project ${aggregator.value} returned by BigQuery"))))
+      )
+    }
   }
   case object Category extends SpendReportingAggregationKey {
     override val bigQueryField: String = "service.description"
     override val bigQueryAlias: String = "service"
+
+    override type AggregationType = TerraSpendCategory
+    override def groupByCriteria(row: FieldValueList): TerraSpendCategory = {
+      TerraSpendCategories.categorize(row.get(bigQueryAlias).getStringValue)
+    }
+
+    override def attachAggregatorToGroupedSpend(groupedSpendReportingData: GroupedSpendReportingData,
+                                                aggregator: TerraSpendCategory,
+                                                workspaceProjectsToNames: Map[GoogleProject, WorkspaceName] = Map.empty): GroupedSpendReportingData = {
+      groupedSpendReportingData.copy(
+        category = Option(aggregator)
+      )
+    }
   }
 }
 
@@ -115,7 +164,7 @@ class SpendReportingJsonSupport extends JsonSupport {
 
   implicit val SpendReportingAggregationFormat: JsonFormat[SpendReportingAggregation] = lazyFormat(jsonFormat2(SpendReportingAggregation))
 
-  implicit val SpendReportingForDateRangeFormat: JsonFormat[SpendReportingForDateRange] = lazyFormat(jsonFormat9(SpendReportingForDateRange))
+  implicit val SpendReportingForDateRangeFormat: JsonFormat[GroupedSpendReportingData] = lazyFormat(jsonFormat9(GroupedSpendReportingData))
 
   implicit val SpendReportingResultsFormat = jsonFormat2(SpendReportingResults)
 }
