@@ -29,6 +29,11 @@ object MigrationUtils {
         case other => Left(s"""Failed to read outcome: unknown value -- "$other"""")
       }
 
+    final def fromEither(either: Either[Throwable, Unit]): Outcome = either match {
+      case Right(_) => Success
+      case Left(throwable) => Failure(throwable.getMessage)
+    }
+
     final def toTuple(outcome: Outcome): (Option[String], Option[String]) = outcome match {
       case Success => ("Success".some, None)
       case Failure(msg) => ("Failure".some, msg.some)

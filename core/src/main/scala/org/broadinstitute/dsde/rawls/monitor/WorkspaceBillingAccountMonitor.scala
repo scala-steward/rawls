@@ -2,15 +2,18 @@ package org.broadinstitute.dsde.rawls.monitor
 
 import akka.actor._
 import akka.http.scaladsl.model.StatusCodes
+import cats.Applicative
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.implicits._
 import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import com.typesafe.scalalogging.LazyLogging
 import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
+import org.broadinstitute.dsde.rawls.dataaccess.slick.BillingAccountChange
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSource}
-import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName}
-import org.broadinstitute.dsde.rawls.monitor.WorkspaceBillingAccountMonitor.CheckAll
+import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
+import org.broadinstitute.dsde.rawls.monitor.WorkspaceBillingAccountMonitor.{CheckAll, UpdateBillingAccounts}
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -22,6 +25,8 @@ object WorkspaceBillingAccountMonitor {
 
   sealed trait WorkspaceBillingAccountsMessage
   case object CheckAll extends WorkspaceBillingAccountsMessage
+  case object UpdateBillingAccounts extends WorkspaceBillingAccountsMessage
+
   val BILLING_ACCOUNT_VALIDATION_ERROR_PREFIX = "Update Billing Account validation failed:"
 }
 
@@ -31,7 +36,43 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
 
   override def receive = {
     case CheckAll => checkAll()
+    case UpdateBillingAccounts => updateBillingAccounts
   }
+
+
+  private def listBillingProjectChanges: IO[List[BillingAccountChange]] = ???
+
+  private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] = ???
+
+  private def syncBillingProjectWithGoogleifV1(project: RawlsBillingProject): IO[Unit] = ???
+
+  private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] = ???
+
+  private def syncWorkspaceWithGoogleIfV2(workspace: Workspace,
+                                          billingAccount: Option[RawlsBillingAccountName]
+                                         ): IO[Unit] = ???
+
+  private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] = ???
+
+  private def updateWorkspaceBillingAccountErrorMessage(workspace: Workspace, outcome: Outcome): IO[Unit] = ???
+
+
+  def updateBillingAccounts: IO[Unit] =
+    listBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
+      for {
+        billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
+        syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt
+        _ <- updateBillingAccountChangeOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
+        _ <- Applicative[IO].whenA(syncAttempt.isRight) {
+          listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
+            for {
+              syncAttempt <- syncWorkspaceWithGoogleIfV2(workspace, billingProject.billingAccount).attempt
+              _ <- updateWorkspaceBillingAccountErrorMessage(workspace, Outcome.fromEither(syncAttempt))
+            } yield ()
+          })
+        }
+      } yield ()
+    })
 
   private def checkAll() = {
     for {
