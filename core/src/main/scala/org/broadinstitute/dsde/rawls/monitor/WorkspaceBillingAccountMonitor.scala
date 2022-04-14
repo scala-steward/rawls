@@ -64,15 +64,19 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
         syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt
         _ <- updateBillingAccountChangeOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
         _ <- Applicative[IO].whenA(syncAttempt.isRight) {
-          listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
-            for {
-              syncAttempt <- syncWorkspaceWithGoogleIfV2(workspace, billingProject.billingAccount).attempt
-              _ <- updateWorkspaceBillingAccountErrorMessage(workspace, Outcome.fromEither(syncAttempt))
-            } yield ()
-          })
+          updateWorkspacesInBillingProject(billingProject)
         }
       } yield ()
     })
+
+  private def updateWorkspacesInBillingProject(billingProject: RawlsBillingProject): IO[Unit] = {
+    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
+      for {
+        syncAttempt <- syncWorkspaceWithGoogleIfV2(workspace, billingProject.billingAccount).attempt
+        _ <- updateWorkspaceBillingAccountErrorMessage(workspace, Outcome.fromEither(syncAttempt))
+      } yield ()
+    })
+  }
 
   private def checkAll() = {
     for {
