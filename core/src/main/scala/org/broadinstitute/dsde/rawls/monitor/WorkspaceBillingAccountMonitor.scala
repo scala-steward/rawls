@@ -43,7 +43,34 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
   }
 
 
-  private def listBillingProjectChanges: IO[List[BillingAccountChange]] = ???
+  /**
+      SELECT foo.*
+      FROM
+        foo,
+        (SELECT name, max(id) as maxid
+           from foo
+           group by name)
+           as x
+      where x.maxid = foo.id
+      and foo.sync is null;
+
+      SELECT *
+      FROM BILLING_ACCOUNT_CHANGES BAC,
+      (SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
+          FROM BILLING_ACCOUNT_CHANGES
+          GROUP BY BILLING_PROJECT_NAME) AS SUBTABLE
+      WHERE SUBTABLE.MAXID = BAC.ID
+      AND BAC.SYNC IS NULL;
+    * @return
+    */
+  private def getBillingProjectChanges = {
+    import dataSource.dataAccess.driver.api._
+    dataSource.inTransaction { dataAccess =>
+      val subquery = dataAccess.billingAccountChangeQuery
+        .groupBy(_.billingProjectName)
+        .map { case (billingProjectName, group) => (billingProjectName, group.map(_.id).max) }
+    }
+  }
 
   private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
     dataSource
@@ -89,7 +116,7 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
 
 
   def updateBillingAccounts: IO[Unit] =
-    listBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
+    getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
         syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt

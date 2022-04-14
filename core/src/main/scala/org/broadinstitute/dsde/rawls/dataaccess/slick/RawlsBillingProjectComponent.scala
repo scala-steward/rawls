@@ -353,6 +353,27 @@ trait RawlsBillingProjectComponent {
         .map(c => (c.outcome, c.message))
         .update(outcome.map(Outcome.toTuple).getOrElse((None, None)))
         .ignore
+
+    /**
+      SELECT *
+      FROM BILLING_ACCOUNT_CHANGES BAC,
+      (SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
+          FROM BILLING_ACCOUNT_CHANGES
+          GROUP BY BILLING_PROJECT_NAME) AS SUBTABLE
+      WHERE SUBTABLE.MAXID = BAC.ID
+      AND BAC.SYNC IS NULL;
+      */
+    def getBillingProjectChanges(): ReadAction[List[BillingAccountChange]] = {
+      val subquery = billingAccountChangeQuery
+        .groupBy(_.billingProjectName)
+        .map { case (_, group) => group.map(_.id).max }
+
+      billingAccountChangeQuery
+        .filter(_.id in subquery)
+        .filter(_.googleSyncTime.isEmpty)
+        .result.map(_.toList)
+    }
+
   }
 }
 

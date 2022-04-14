@@ -120,4 +120,8 @@ class RawlsBillingProjectComponentSpec extends TestDriverComponentWithFlatSpecAn
         testData.userOwner.userSubjectId))
     }
   }
+
+  "BillingAccountChange" should "be able to load records that need to be sync'd" in withDefaultTestDatabase {
+
+  }
 }
