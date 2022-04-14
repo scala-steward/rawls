@@ -346,6 +346,13 @@ trait RawlsBillingProjectComponent {
         .take(1)
         .result
         .map(_.headOption)
+
+    def setOutcome(change: BillingAccountChange, outcome: Option[Outcome]): WriteAction[Unit] =
+      billingAccountChangeQuery
+        .filter(_.id === change.id)
+        .map(c => (c.outcome, c.message))
+        .update(outcome.map(Outcome.toTuple).getOrElse((None, None)))
+        .ignore
   }
 }
 

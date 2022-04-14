@@ -8,12 +8,15 @@ import cats.effect.unsafe.implicits.global
 import cats.implicits._
 import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import com.typesafe.scalalogging.LazyLogging
-import org.broadinstitute.dsde.rawls.RawlsExceptionWithErrorReport
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.BillingAccountChange
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
 import org.broadinstitute.dsde.rawls.monitor.WorkspaceBillingAccountMonitor.{CheckAll, UpdateBillingAccounts}
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
+import slick.ast.ScalaBaseType.stringType
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -42,19 +45,47 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
 
   private def listBillingProjectChanges: IO[List[BillingAccountChange]] = ???
 
-  private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] = ???
+  private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
+    dataSource
+      .inTransaction(_.rawlsBillingProjectQuery.load(projectName))
+      .io
+      .map(_.getOrElse(throw new RawlsException(s"No such billing account $projectName")))
+
 
   private def syncBillingProjectWithGoogleifV1(project: RawlsBillingProject): IO[Unit] = ???
 
-  private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] = ???
+
+  private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] =
+    dataSource
+      .inTransaction(_.workspaceQuery.listWithBillingProject(billingProjectName))
+      .io
+      .map(_.toList)
+
 
   private def syncWorkspaceWithGoogleIfV2(workspace: Workspace,
                                           billingAccount: Option[RawlsBillingAccountName]
                                          ): IO[Unit] = ???
 
-  private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] = ???
 
-  private def updateWorkspaceBillingAccountErrorMessage(workspace: Workspace, outcome: Outcome): IO[Unit] = ???
+  private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
+    dataSource
+      .inTransaction(_.billingAccountChangeQuery.setOutcome(change, outcome.some))
+      .io
+
+
+  private def updateWorkspaceBillingAccountErrorMessage(workspace: Workspace, outcome: Outcome): IO[Unit] =
+    dataSource
+      .inTransaction(_
+        .workspaceQuery
+        .updateWorkspaceBillingAccountErrorMessages(
+          workspace.googleProjectId,
+          outcome match {
+            case Success => ""
+            case Failure(message) => message
+        })
+      )
+      .io
+      .void
 
 
   def updateBillingAccounts: IO[Unit] =
