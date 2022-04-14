@@ -122,6 +122,24 @@ class RawlsBillingProjectComponentSpec extends TestDriverComponentWithFlatSpecAn
   }
 
   "BillingAccountChange" should "be able to load records that need to be sync'd" in withDefaultTestDatabase {
-
+    runAndWait{
+      for {
+        _ <- rawlsBillingProjectQuery.updateBillingAccount(
+          testData.testProject1Name,
+          billingAccount = RawlsBillingAccountName("bananas").some,
+          testData.userOwner.userSubjectId)
+        _ <- rawlsBillingProjectQuery.updateBillingAccount(
+          testData.testProject2Name,
+          billingAccount = RawlsBillingAccountName("kumquat").some,
+          testData.userOwner.userSubjectId)
+        _ <- rawlsBillingProjectQuery.updateBillingAccount(
+          testData.testProject1Name,
+          billingAccount = RawlsBillingAccountName("kumquat").some,
+          testData.userOwner.userSubjectId)
+        changes <- billingAccountChangeQuery.getBillingProjectChanges()
+        change1 <- billingAccountChangeQuery.lastChange(testData.testProject2Name)
+        change2 <- billingAccountChangeQuery.lastChange(testData.testProject1Name)
+      } yield changes shouldBe List(change1, change2).map(_.value)
+    }
   }
 }
