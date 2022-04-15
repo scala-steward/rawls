@@ -17,6 +17,7 @@ import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 
+import java.time.Instant
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -45,7 +46,9 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
     getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
-        syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt
+        syncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
+        syncTime <- nowInstant
+        _ <- setGoogleSyncTime(billingAccountChange, syncTime)
         _ <- updateBillingAccountChangeOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
         _ <- Applicative[IO].whenA(syncAttempt.isRight) {
           updateWorkspacesInBillingProject(billingProject)
@@ -64,9 +67,20 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
       .io
       .map(_.getOrElse(throw new RawlsException(s"No such billing account $projectName")))
 
+  private def nowInstant: IO[Instant] = IO(Instant.now)
 
-  private def syncBillingProjectWithGoogleifV1(project: RawlsBillingProject): IO[Unit] = ???
+  private def syncBillingProjectWithGoogle(project: RawlsBillingProject): IO[Unit] =
+    for {
+      isV1BillingProject <- gcsDAO.rawlsCreatedGoogleProjectExists(project.googleProjectId).io
+      _ <- Applicative[IO].whenA(isV1BillingProject)(
+        updateBillingAccountOnGoogle(project.googleProjectId, project.billingAccount).io
+      )
+    } yield ()
 
+  private def setGoogleSyncTime(billingAccountChange: BillingAccountChange, syncTime: Instant): IO[Unit] =
+    dataSource
+      .inTransaction(_.billingAccountChangeQuery.setGoogleSyncTime(billingAccountChange, syncTime.some))
+      .io
 
   private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
     dataSource

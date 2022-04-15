@@ -354,6 +354,13 @@ trait RawlsBillingProjectComponent {
         .update(outcome.map(Outcome.toTuple).getOrElse((None, None)))
         .ignore
 
+    def setGoogleSyncTime(change: BillingAccountChange, syncTime: Option[Instant]): WriteAction[Unit] =
+      billingAccountChangeQuery
+        .filter(_.id === change.id)
+        .map(_.googleSyncTime)
+        .update(syncTime.map(Timestamp.from))
+        .ignore
+
     /* SELECT *
      * FROM BILLING_ACCOUNT_CHANGES BAC,
      * (  SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
