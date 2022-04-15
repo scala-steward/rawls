@@ -8,7 +8,6 @@ import cats.effect.unsafe.implicits.global
 import cats.implicits._
 import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import com.typesafe.scalalogging.LazyLogging
-import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.broadinstitute.dsde.rawls.dataaccess.slick.BillingAccountChange
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
@@ -16,7 +15,7 @@ import org.broadinstitute.dsde.rawls.monitor.WorkspaceBillingAccountMonitor.{Che
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
-import slick.ast.ScalaBaseType.stringType
+import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,38 +38,25 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
 
   override def receive = {
     case CheckAll => checkAll()
-    case UpdateBillingAccounts => updateBillingAccounts
+    case UpdateBillingAccounts => updateBillingAccounts.unsafeRunSync()
   }
 
+  def updateBillingAccounts: IO[Unit] =
+    getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
+      for {
+        billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
+        syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt
+        _ <- updateBillingAccountChangeOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
+        _ <- Applicative[IO].whenA(syncAttempt.isRight) {
+          updateWorkspacesInBillingProject(billingProject)
+        }
+      } yield ()
+    })
 
-  /**
-      SELECT foo.*
-      FROM
-        foo,
-        (SELECT name, max(id) as maxid
-           from foo
-           group by name)
-           as x
-      where x.maxid = foo.id
-      and foo.sync is null;
 
-      SELECT *
-      FROM BILLING_ACCOUNT_CHANGES BAC,
-      (SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
-          FROM BILLING_ACCOUNT_CHANGES
-          GROUP BY BILLING_PROJECT_NAME) AS SUBTABLE
-      WHERE SUBTABLE.MAXID = BAC.ID
-      AND BAC.SYNC IS NULL;
-    * @return
-    */
-  private def getBillingProjectChanges = {
-    import dataSource.dataAccess.driver.api._
-    dataSource.inTransaction { dataAccess =>
-      val subquery = dataAccess.billingAccountChangeQuery
-        .groupBy(_.billingProjectName)
-        .map { case (billingProjectName, group) => (billingProjectName, group.map(_.id).max) }
-    }
-  }
+  private def getBillingProjectChanges: IO[List[BillingAccountChange]] =
+    dataSource.inTransaction { _.billingAccountChangeQuery.getLatestChanges }.io.map(_.toList)
+
 
   private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
     dataSource
@@ -80,6 +66,22 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
 
 
   private def syncBillingProjectWithGoogleifV1(project: RawlsBillingProject): IO[Unit] = ???
+
+
+  private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
+    dataSource
+      .inTransaction(_.billingAccountChangeQuery.setOutcome(change, outcome.some))
+      .io
+
+
+  private def updateWorkspacesInBillingProject(billingProject: RawlsBillingProject): IO[Unit] = {
+    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
+      for {
+        syncAttempt <- syncWorkspaceWithGoogleIfV2(workspace, billingProject.billingAccount).attempt
+        _ <- updateWorkspaceBillingAccountErrorMessage(workspace, Outcome.fromEither(syncAttempt))
+      } yield ()
+    })
+  }
 
 
   private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] =
@@ -92,12 +94,6 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
   private def syncWorkspaceWithGoogleIfV2(workspace: Workspace,
                                           billingAccount: Option[RawlsBillingAccountName]
                                          ): IO[Unit] = ???
-
-
-  private def updateBillingAccountChangeOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
-    dataSource
-      .inTransaction(_.billingAccountChangeQuery.setOutcome(change, outcome.some))
-      .io
 
 
   private def updateWorkspaceBillingAccountErrorMessage(workspace: Workspace, outcome: Outcome): IO[Unit] =
@@ -114,27 +110,6 @@ class WorkspaceBillingAccountMonitor(dataSource: SlickDataSource, gcsDAO: Google
       .io
       .void
 
-
-  def updateBillingAccounts: IO[Unit] =
-    getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
-      for {
-        billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
-        syncAttempt <- syncBillingProjectWithGoogleifV1(billingProject).attempt
-        _ <- updateBillingAccountChangeOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
-        _ <- Applicative[IO].whenA(syncAttempt.isRight) {
-          updateWorkspacesInBillingProject(billingProject)
-        }
-      } yield ()
-    })
-
-  private def updateWorkspacesInBillingProject(billingProject: RawlsBillingProject): IO[Unit] = {
-    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
-      for {
-        syncAttempt <- syncWorkspaceWithGoogleIfV2(workspace, billingProject.billingAccount).attempt
-        _ <- updateWorkspaceBillingAccountErrorMessage(workspace, Outcome.fromEither(syncAttempt))
-      } yield ()
-    })
-  }
 
   private def checkAll() = {
     for {

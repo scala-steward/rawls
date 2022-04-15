@@ -338,8 +338,8 @@ trait RawlsBillingProjectComponent {
         .insert((billingProjectName.value, previousBillingAccount.map(_.value), newBillingAccount.map(_.value), userSubjectId.value))
         .ignore
 
-    def lastChange(billingProjectName: RawlsBillingProjectName)
-                  (implicit executionContext: ExecutionContext): ReadWriteAction[Option[BillingAccountChange]] =
+    def getLastChange(billingProjectName: RawlsBillingProjectName)
+                     (implicit executionContext: ExecutionContext): ReadWriteAction[Option[BillingAccountChange]] =
       billingAccountChangeQuery
         .filter(_.billingProjectName === billingProjectName.value)
         .sortBy(_.id.desc)
@@ -354,26 +354,26 @@ trait RawlsBillingProjectComponent {
         .update(outcome.map(Outcome.toTuple).getOrElse((None, None)))
         .ignore
 
-    /**
-      SELECT *
-      FROM BILLING_ACCOUNT_CHANGES BAC,
-      (SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
-          FROM BILLING_ACCOUNT_CHANGES
-          GROUP BY BILLING_PROJECT_NAME) AS SUBTABLE
-      WHERE SUBTABLE.MAXID = BAC.ID
-      AND BAC.SYNC IS NULL;
-      */
-    def getBillingProjectChanges(): ReadAction[List[BillingAccountChange]] = {
-      val subquery = billingAccountChangeQuery
+    /* SELECT *
+     * FROM BILLING_ACCOUNT_CHANGES BAC,
+     * (  SELECT BILLING_PROJECT_NAME, MAX(ID) AS MAXID
+     *    FROM BILLING_ACCOUNT_CHANGES
+     *    GROUP BY BILLING_PROJECT_NAME
+     * ) AS SUBTABLE
+     * WHERE SUBTABLE.MAXID = BAC.ID
+     * AND BAC.SYNC IS NULL;
+     */
+    def getLatestChanges: ReadAction[List[BillingAccountChange]] = {
+      val latestChangeIds = billingAccountChangeQuery
         .groupBy(_.billingProjectName)
         .map { case (_, group) => group.map(_.id).max }
 
       billingAccountChangeQuery
-        .filter(_.id in subquery)
-        .filter(_.googleSyncTime.isEmpty)
-        .result.map(_.toList)
+        .filter(change => change.id.in(latestChangeIds) && change.googleSyncTime.isEmpty)
+        .sortBy(_.id.asc)
+        .result
+        .map(_.toList)
     }
-
   }
 }
 
