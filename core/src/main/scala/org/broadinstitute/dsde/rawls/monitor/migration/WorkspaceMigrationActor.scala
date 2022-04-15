@@ -20,17 +20,16 @@ import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils._
 import org.broadinstitute.dsde.rawls.monitor.migration.WorkspaceMigrationHistory._
 import org.broadinstitute.dsde.rawls.workspace.WorkspaceService
 import org.broadinstitute.dsde.workbench.google2.GoogleStorageTransferService.JobTransferSchedule
-import org.broadinstitute.dsde.workbench.google2.util.RetryPredicates
 import org.broadinstitute.dsde.workbench.google2.{GoogleStorageService, GoogleStorageTransferService, StorageRole}
 import org.broadinstitute.dsde.workbench.model.google.{GcsBucketName, GoogleProject}
 
 import java.sql.Timestamp
 import java.time.{Instant, LocalDateTime, ZoneOffset}
 import java.util.UUID
-import scala.jdk.CollectionConverters._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 
 object WorkspaceMigrationActor {
@@ -632,7 +631,7 @@ object WorkspaceMigrationActor {
         storageTransferJobs
           .filter(_.id === transferJob.id)
           .map(row => (row.finished, row.outcome, row.message))
-          .update(finished, status, message)
+          .update(finished, status.some, message)
       }
     } yield transferJob.copy(finished = finished, outcome = outcome.some)
 
@@ -705,7 +704,7 @@ object WorkspaceMigrationActor {
         workspaceMigrations
           .filter(_.id === migrationId)
           .map(m => (m.finished, m.outcome, m.message))
-          .update((finished.some, status, message))
+          .update((finished.some, status.some, message))
           .ignore
       }
     }

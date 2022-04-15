@@ -1,5 +1,6 @@
 package org.broadinstitute.dsde.rawls.monitor.migration
 
+import cats.arrow.Arrow
 import cats.effect.IO
 import cats.implicits._
 import cats.kernel.Semigroup
@@ -34,10 +35,15 @@ object MigrationUtils {
       case Left(throwable) => Failure(throwable.getMessage)
     }
 
-    final def toTuple(outcome: Outcome): (Option[String], Option[String]) = outcome match {
-      case Success => ("Success".some, None)
-      case Failure(msg) => ("Failure".some, msg.some)
+    final def toTuple(outcome: Outcome): (String, Option[String]) = outcome match {
+      case Success => ("Success", None)
+      case Failure(msg) => ("Failure", msg.some)
     }
+
+    final def toFields(outcome: Option[Outcome]): (Option[String], Option[String]) =
+      outcome
+        .map(Arrow[Function].first((_ : String).some) compose toTuple)
+        .getOrElse((None, None))
   }
 
   object Implicits {

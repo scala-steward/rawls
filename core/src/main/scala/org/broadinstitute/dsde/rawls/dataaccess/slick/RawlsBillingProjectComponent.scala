@@ -313,7 +313,7 @@ trait RawlsBillingProjectComponent {
     }
 
     def toRecord(billingAccountChange: BillingAccountChange): RecordType = {
-      val (outcome, message) = billingAccountChange.outcome.map(Outcome.toTuple).getOrElse((None, None))
+      val outcome = billingAccountChange.outcome.map(Outcome.toTuple)
       (
         billingAccountChange.id,
         billingAccountChange.billingProjectName.value,
@@ -322,8 +322,8 @@ trait RawlsBillingProjectComponent {
         billingAccountChange.newBillingAccount.map(_.value),
         Timestamp.from(billingAccountChange.created),
         billingAccountChange.googleSyncTime.map(Timestamp.from),
-        outcome,
-        message
+        outcome.map(_._1),
+        outcome.flatMap(_._2)
       )
     }
   }
@@ -351,7 +351,7 @@ trait RawlsBillingProjectComponent {
       billingAccountChangeQuery
         .filter(_.id === change.id)
         .map(c => (c.outcome, c.message))
-        .update(outcome.map(Outcome.toTuple).getOrElse((None, None)))
+        .update(Outcome.toFields(outcome))
         .ignore
 
     def setGoogleSyncTime(change: BillingAccountChange, syncTime: Option[Instant]): WriteAction[Unit] =
