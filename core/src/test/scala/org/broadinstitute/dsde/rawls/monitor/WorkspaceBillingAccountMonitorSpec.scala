@@ -7,6 +7,7 @@ import io.opencensus.trace.{Span => OpenCensusSpan}
 import org.broadinstitute.dsde.rawls.dataaccess._
 import org.broadinstitute.dsde.rawls.dataaccess.slick.{ReadAction, TestDriverComponentWithFlatSpecAndMatchers}
 import org.broadinstitute.dsde.rawls.model._
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 import org.joda.time.DateTime
 import org.mockito.ArgumentMatchers
@@ -17,6 +18,7 @@ import org.scalatestplus.mockito.MockitoSugar
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.{postfixOps, reflectiveCalls}
 
@@ -323,5 +325,62 @@ class WorkspaceBillingAccountMonitorSpec
         }
       }
     }
+
+  it should "sync only the latest billing account changes" in
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      val finalBillingAccountName = runAndWait {
+        for {
+          _ <- rawlsBillingProjectQuery.create(testData.billingProject)
+          _ <- workspaceQuery.createOrUpdate(testData.v1Workspace)
+
+          mkBillingAccount = () => RawlsBillingAccountName(UUID.randomUUID.toString)
+          setBillingAccount = (billingAccount: RawlsBillingAccountName) => rawlsBillingProjectQuery.updateBillingAccount(
+            testData.billingProject.projectName,
+            Some(billingAccount),
+            testData.userOwner.userSubjectId
+          )
+
+          _ <- setBillingAccount(mkBillingAccount())
+          _ <- setBillingAccount(mkBillingAccount())
+          _ <- setBillingAccount(mkBillingAccount())
+
+          finalBillingAccount = mkBillingAccount()
+          _ <- setBillingAccount(finalBillingAccount)
+        } yield finalBillingAccount
+      }
+
+      val actor = WorkspaceBillingAccountActor(dataSource, gcsDAO = new MockGoogleServicesDAO("test"))
+
+      @nowarn("msg=not.*?exhaustive")
+      val test = for {
+        billingProjectUpdatesBefore <- actor.getBillingProjectChanges
+        _ <- actor.updateBillingAccounts
+        billingProjectUpdatesAfter <- actor.getBillingProjectChanges
+
+        lastChange :: previousChanges <- dataSource.inTransaction { dataAccess =>
+          import dataAccess.driver.api._
+          dataAccess
+            .billingAccountChangeQuery
+            .filter(_.billingProjectName === testData.billingProject.projectName.value)
+            .sortBy(_.id.desc)
+            .result
+            .map(_.toList)
+        }.io
+
+      } yield {
+        // before updating billing accounts, there should be one change only.
+        billingProjectUpdatesBefore.size shouldBe 1
+        // after updating, there should be no pending billing account changes.
+        billingProjectUpdatesAfter shouldBe List.empty
+
+        lastChange.googleSyncTime shouldBe defined
+        lastChange.newBillingAccount shouldBe Some(finalBillingAccountName)
+
+        // all previous changes should be ignored
+        every(previousChanges.map(_.googleSyncTime)) shouldBe empty
+      }
+
+      test.unsafeRunSync()
+  }
 
 }

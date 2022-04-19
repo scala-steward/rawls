@@ -74,7 +74,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     })
 
 
-  private def getBillingProjectChanges: IO[List[BillingAccountChange]] =
+  def getBillingProjectChanges: IO[List[BillingAccountChange]] =
     dataSource.inTransaction(_.billingAccountChangeQuery.getLatestChanges).io.map(_.toList)
 
 
