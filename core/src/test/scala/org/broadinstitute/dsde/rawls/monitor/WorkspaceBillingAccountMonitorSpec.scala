@@ -383,4 +383,27 @@ class WorkspaceBillingAccountMonitorSpec
       test.unsafeRunSync()
   }
 
+  it should "sync billing account changes even when there are no workspaces in the billing project" in
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      runAndWait {
+        for {
+          _ <- rawlsBillingProjectQuery.create(testData.billingProject)
+          _ <- rawlsBillingProjectQuery.updateBillingAccount(
+            testData.billingProject.projectName,
+            billingAccount = None,
+            testData.userOwner.userSubjectId
+          )
+        } yield ()
+      }
+
+      WorkspaceBillingAccountActor(dataSource, gcsDAO = new MockGoogleServicesDAO("test"))
+        .updateBillingAccounts
+        .unsafeRunSync()
+
+      runAndWait {
+        for {
+          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+        } yield lastChange.value.googleSyncTime shouldBe defined
+      }
+    }
 }
