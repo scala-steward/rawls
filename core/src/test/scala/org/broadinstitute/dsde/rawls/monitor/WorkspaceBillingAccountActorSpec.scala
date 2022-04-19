@@ -355,9 +355,9 @@ class WorkspaceBillingAccountActorSpec
 
       @nowarn("msg=not.*?exhaustive")
       val test = for {
-        billingProjectUpdatesBefore <- actor.getBillingProjectChanges
+        billingProjectUpdatesBefore <- actor.getABillingProjectChange
         _ <- actor.updateBillingAccounts
-        billingProjectUpdatesAfter <- actor.getBillingProjectChanges
+        billingProjectUpdatesAfter <- actor.getABillingProjectChange
 
         lastChange :: previousChanges <- dataSource.inTransaction { dataAccess =>
           import dataAccess.driver.api._
@@ -373,7 +373,7 @@ class WorkspaceBillingAccountActorSpec
         // before updating billing accounts, there should be one change only.
         billingProjectUpdatesBefore.size shouldBe 1
         // after updating, there should be no pending billing account changes.
-        billingProjectUpdatesAfter shouldBe List.empty
+        billingProjectUpdatesAfter shouldBe empty
 
         lastChange.googleSyncTime shouldBe defined
         lastChange.newBillingAccount shouldBe Some(finalBillingAccountName)

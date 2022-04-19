@@ -51,8 +51,19 @@ object WorkspaceBillingAccountActor {
 final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDAO: GoogleServicesDAO)
   extends LazyLogging {
 
+  /* Sync billing account changes to billing projects and their associated workspaces with Google
+   * one-at-a-time.
+   *
+   * Why not all-at-once?
+   * To reduce the number of stale billing account changes we make.
+   *
+   * Let's imagine that there are lots of billing account changes to sync. If a user changes
+   * the billing account on a billing project that's currently being sync'ed then we'll have to
+   * sync the billing projects and all workspaces again immediately. If we sync one-at-a-time
+   * we'll have a better chance of doing this once.
+   */
   def updateBillingAccounts: IO[Unit] =
-    getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
+    getABillingProjectChange.flatMap(_.traverse_ { billingAccountChange =>
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
@@ -74,8 +85,8 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     })
 
 
-  def getBillingProjectChanges: IO[List[BillingAccountChange]] =
-    dataSource.inTransaction(_.billingAccountChangeQuery.getLatestChanges).io.map(_.toList)
+  def getABillingProjectChange: IO[Option[BillingAccountChange]] =
+    dataSource.inTransaction(_.billingAccountChangeQuery.getLatestChanges.map(_.headOption)).io
 
 
   private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
@@ -132,7 +143,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
           case Success => None
           case Failure(message) => Some(message)
         })
-  }.io.void
+    }.io.void
 
 
   private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): Future[Unit] = {
