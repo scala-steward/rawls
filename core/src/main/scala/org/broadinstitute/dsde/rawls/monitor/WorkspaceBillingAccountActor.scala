@@ -50,14 +50,14 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
   extends LazyLogging {
 
   /* Sync billing account changes to billing projects and their associated workspaces with Google
-   * one-at-a-time.
+   * one at a time.
    *
-   * Why not all-at-once?
+   * Why not all at once?
    * To reduce the number of stale billing account changes we make.
    *
    * Let's imagine that there are lots of billing account changes to sync. If a user changes
    * the billing account on a billing project that's currently being sync'ed then we'll have to
-   * sync the billing projects and all workspaces again immediately. If we sync one-at-a-time
+   * sync the billing projects and all workspaces again immediately. If we sync one at a time
    * we'll have a better chance of doing this once.
    */
   def updateBillingAccounts: IO[Unit] =
