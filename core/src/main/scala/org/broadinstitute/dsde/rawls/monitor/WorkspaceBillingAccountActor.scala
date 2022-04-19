@@ -71,26 +71,9 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
-        _ <- recordBillingProjectSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
-        _ <- listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
-          for {
-            _ <- info("Updating Billing Account on Workspace Google Project",
-              "changeId" -> billingAccountChange.id,
-              "workspace" -> workspace.toWorkspaceName,
-              "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
-            )
-
-            // error messages from syncing v1 billing projects are also written to the v1 workspace
-            // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
-            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
-              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt else
-              IO.pure(billingProjectSyncAttempt)
-
-            _ <- recordWorkspaceSyncOutcome(billingAccountChange, workspace,
-              billingProject.billingAccount, Outcome.fromEither(workspaceSyncAttempt)
-            )
-          } yield ()
-        })
+        syncOutcome = Outcome.fromEither(billingProjectSyncAttempt)
+        _ <- recordBillingProjectSyncOutcome(billingAccountChange, syncOutcome)
+        _ <- updateWorkspacesInProject(billingAccountChange, billingProject, syncOutcome)
       } yield ()
     })
 
@@ -146,6 +129,30 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         )
       }.io
     } yield ()
+
+
+  def updateWorkspacesInProject(billingAccountChange: BillingAccountChange,
+                                billingProject: RawlsBillingProject,
+                                billProjectSyncOutcome: Outcome): IO[Unit] =
+    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
+      for {
+        _ <- info("Updating Billing Account on Workspace Google Project",
+          "changeId" -> billingAccountChange.id,
+          "workspace" -> workspace.toWorkspaceName,
+          "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
+        )
+
+        // error messages from syncing v1 billing projects are also written to the v1 workspace
+        // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
+        workspaceSyncOutcome <- if (workspace.googleProjectId != billingProject.googleProjectId)
+          updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt.map(Outcome.fromEither) else
+          IO.pure(billProjectSyncOutcome)
+
+        _ <- recordWorkspaceSyncOutcome(billingAccountChange, workspace,
+          billingProject.billingAccount, workspaceSyncOutcome
+        )
+      } yield ()
+    })
 
 
   private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] =
