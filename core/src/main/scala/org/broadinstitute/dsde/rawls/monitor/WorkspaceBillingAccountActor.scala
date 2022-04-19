@@ -64,14 +64,17 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     getABillingProjectChange.flatMap(_.traverse_ { billingAccountChange =>
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
+        _ = logger.info(s"""syncing billing account on billing project "${billingProject.projectName}" to "${billingProject.billingAccount}".""")
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
         _ <- recordBillingProjectSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
         _ <- listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
           for {
             // error messages from syncing v1 billing projects are also written to the v1 workspace
             // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
-            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
-              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt else
+            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId) {
+              logger.info(s"""syncing billing account on workspace "${workspace.toWorkspaceName}" to "${billingProject.billingAccount}".""")
+              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt
+            } else
               IO.pure(billingProjectSyncAttempt)
 
             _ <- recordWorkspaceSyncOutcome(workspace, billingProject.billingAccount,
@@ -107,6 +110,10 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     for {
       syncTime <- IO(Timestamp.from(Instant.now))
       (outcomeString, message) = Outcome.toTuple(outcome)
+      _ = if (outcome.isSuccess)
+        logger.info(s"""Successfully synced Billing Account on Billing Project "${change.billingProjectName}" to "${change.newBillingAccount}".""") else
+        logger.warn(s"""Failed to sync Billing Account on Billing Project "${change.billingProjectName}" to "${change.newBillingAccount}": "$message".""")
+
       _ <- dataSource.inTransaction { dataAccess =>
         import dataAccess.driver.api._
 
@@ -135,7 +142,17 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
   private def recordWorkspaceSyncOutcome(workspace: Workspace,
                                          billingAccount: Option[RawlsBillingAccountName],
-                                         outcome: Outcome): IO[Unit] =
+                                         outcome: Outcome): IO[Unit] = {
+    val failureMessage = outcome match {
+      case Success =>
+        logger.info(s"""Successfully synced Billing Account on workspace Google Project "${workspace.googleProjectId}" to "${billingAccount}".""")
+        None
+      case Failure(message) =>
+        val failure = s"""Failed to sync Billing account on workspace Google Project "${workspace.googleProjectId}" Billing Account to "$billingAccount": "$message"."""
+        logger.warn(failure)
+        Some(failure)
+    }
+
     dataSource.inTransaction { dataAccess =>
       import dataAccess.driver.api._
 
@@ -147,14 +164,10 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         if (outcome.isSuccess)
           wsQuery.map(_.currentBillingAccountOnGoogleProject).update(billingAccount.map(_.value)) else
           DBIO.successful(),
-        wsQuery.map(_.billingAccountErrorMessage).update(outcome match {
-          case Success => None
-          case Failure(message) => Some(
-            s"""Failed to set workspace Google Project "${workspace.googleProjectId}" Billing Account to "$billingAccount": "$message"."""
-          )
-        })
+        wsQuery.map(_.billingAccountErrorMessage).update(failureMessage)
       )
-    }.io.void
+    }.io
+  }
 
 
   private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): IO[Unit] =
