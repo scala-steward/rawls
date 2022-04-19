@@ -23,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.language.{postfixOps, reflectiveCalls}
 
 
-class WorkspaceBillingAccountMonitorSpec
+class WorkspaceBillingAccountActorSpec
   extends TestDriverComponentWithFlatSpecAndMatchers
     with MockitoSugar
     with OptionValues {
