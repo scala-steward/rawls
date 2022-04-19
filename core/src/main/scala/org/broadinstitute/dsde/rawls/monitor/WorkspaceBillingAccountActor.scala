@@ -12,7 +12,7 @@ import org.broadinstitute.dsde.rawls.RawlsException
 import org.broadinstitute.dsde.rawls.dataaccess.slick.BillingAccountChange
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
-import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.{FutureToIO, ToJsonOps}
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
 
@@ -63,22 +63,31 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
   def updateBillingAccounts: IO[Unit] =
     getABillingProjectChange.flatMap(_.traverse_ { billingAccountChange =>
       for {
+        _ <- info("Updating Billing Account on Billing Project in Google",
+          "changeId" -> billingAccountChange.id,
+          "billingProject" -> billingAccountChange.billingProjectName.value,
+          "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
+        )
+
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
-        _ = logger.info(s"""syncing billing account on billing project "${billingProject.projectName}" to "${billingProject.billingAccount}".""")
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
         _ <- recordBillingProjectSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
         _ <- listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
           for {
+            _ <- info("Updating Billing Account on Workspace Google Project",
+              "changeId" -> billingAccountChange.id,
+              "workspace" -> workspace.toWorkspaceName,
+              "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
+            )
+
             // error messages from syncing v1 billing projects are also written to the v1 workspace
             // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
-            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId) {
-              logger.info(s"""syncing billing account on workspace "${workspace.toWorkspaceName}" to "${billingProject.billingAccount}".""")
-              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt
-            } else
+            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
+              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt else
               IO.pure(billingProjectSyncAttempt)
 
-            _ <- recordWorkspaceSyncOutcome(workspace, billingProject.billingAccount,
-              Outcome.fromEither(workspaceSyncAttempt)
+            _ <- recordWorkspaceSyncOutcome(billingAccountChange, workspace,
+              billingProject.billingAccount, Outcome.fromEither(workspaceSyncAttempt)
             )
           } yield ()
         })
@@ -110,9 +119,15 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     for {
       syncTime <- IO(Timestamp.from(Instant.now))
       (outcomeString, message) = Outcome.toTuple(outcome)
-      _ = if (outcome.isSuccess)
-        logger.info(s"""Successfully synced Billing Account on Billing Project "${change.billingProjectName}" to "${change.newBillingAccount}".""") else
-        logger.warn(s"""Failed to sync Billing Account on Billing Project "${change.billingProjectName}" to "${change.newBillingAccount}": "$message".""")
+      baseInfo = Seq(
+        "changeId" -> change.id,
+        "billingProject" -> change.billingProjectName.value,
+        "newBillingAccount" -> change.newBillingAccount.map(_.value)
+      )
+
+      _ <- if (outcome.isSuccess)
+        info("Successfully updated Billing Account on Billing Project in Google", baseInfo :_*) else
+        warn("Failed to update Billing Account on Billing Project in Google", ("details" -> message) +: baseInfo :_*)
 
       _ <- dataSource.inTransaction { dataAccess =>
         import dataAccess.driver.api._
@@ -140,20 +155,28 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
       .map(_.toList)
 
 
-  private def recordWorkspaceSyncOutcome(workspace: Workspace,
+  private def recordWorkspaceSyncOutcome(change: BillingAccountChange,
+                                         workspace: Workspace,
                                          billingAccount: Option[RawlsBillingAccountName],
-                                         outcome: Outcome): IO[Unit] = {
-    val failureMessage = outcome match {
+                                         outcome: Outcome): IO[Unit] =
+  for {
+    failureMessage <- outcome match {
       case Success =>
-        logger.info(s"""Successfully synced Billing Account on workspace Google Project "${workspace.googleProjectId}" to "${billingAccount}".""")
-        None
+        IO.pure(None) <* info("Successfully updated Billing Account on Workspace Google Project",
+          "changeId" -> change.id,
+          "workspace" -> workspace.toWorkspaceName,
+          "newBillingAccount" -> billingAccount.map(_.value)
+        )
       case Failure(message) =>
-        val failure = s"""Failed to sync Billing account on workspace Google Project "${workspace.googleProjectId}" Billing Account to "$billingAccount": "$message"."""
-        logger.warn(failure)
-        Some(failure)
+        IO.pure(message.some) <* warn("Failed to update Billing Account on Workspace Google Project",
+          "changeId" -> change.id,
+          "details" -> message,
+          "workspace" -> workspace.toWorkspaceName,
+          "newBillingAccount" -> billingAccount.map(_.value)
+        )
     }
 
-    dataSource.inTransaction { dataAccess =>
+    _ <- dataSource.inTransaction { dataAccess =>
       import dataAccess.driver.api._
 
       val wsQuery = dataAccess
@@ -167,7 +190,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         wsQuery.map(_.billingAccountErrorMessage).update(failureMessage)
       )
     }.io
-  }
+  } yield ()
 
 
   private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): IO[Unit] =
@@ -203,6 +226,14 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     */
   private def getBillingAccountOption(projectBillingInfo: ProjectBillingInfo): Option[RawlsBillingAccountName] =
     Option(projectBillingInfo.getBillingAccountName).filter(_.isBlank).map(RawlsBillingAccountName)
+
+
+  private def info(message: String, data: (String, Any)*) : IO[Unit] =
+    IO(logger.info((("message" -> message) +: data).toJson.prettyPrint))
+
+
+  private def warn(message: String, data: (String, Any)*) : IO[Unit] =
+    IO(logger.warn((("message" -> message) +: data).toJson.prettyPrint))
 
 }
 

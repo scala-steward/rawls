@@ -115,8 +115,10 @@ object MigrationUtils {
     }
 
 
-    implicit class ToJsonOps(data: Map[String, Any]) {
-      def toJson: JsValue = JsObject(data.view.mapValues(s => new JsString(s.toString)).toMap)
+    implicit class ToJsonOps(data: Iterable[(String, Any)]) {
+      def toJson: JsValue = JsObject(
+        data.map(Arrow[Function].second((s: Any) => new JsString(s.toString))).toMap
+      )
     }
   }
 

@@ -199,11 +199,9 @@ class WorkspaceBillingAccountActorSpec
       val exceptionMessage = "oh what a shame!  It went kerplooey!"
       val failingGcsDao = new MockGoogleServicesDAO("") {
         override def getBillingInfoForGoogleProject(googleProjectId: GoogleProjectId)(implicit executionContext: ExecutionContext): Future[ProjectBillingInfo] = {
-          if (googleProjectId == badWorkspaceGoogleProjectId) {
-            Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.Forbidden, exceptionMessage)))
-          } else {
+          if (googleProjectId == badWorkspaceGoogleProjectId)
+            Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.Forbidden, exceptionMessage))) else
             super.getBillingInfoForGoogleProject(googleProjectId)
-          }
         }
       }
 
@@ -416,6 +414,91 @@ class WorkspaceBillingAccountActorSpec
         for {
           lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
         } yield lastChange.value.googleSyncTime shouldBe defined
+      }
+    }
+
+  it should "mark the billing account as invalid if it fails to sync a v1 billing project" in
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      runAndWait {
+        for {
+          _ <- rawlsBillingProjectQuery.create(testData.billingProject)
+          _ <- workspaceQuery.createOrUpdate(testData.v1Workspace)
+          _ <- rawlsBillingProjectQuery.updateBillingAccount(
+            testData.billingProject.projectName,
+            billingAccount = RawlsBillingAccountName(UUID.randomUUID.toString).some,
+            testData.userOwner.userSubjectId
+          )
+        } yield ()
+      }
+
+      val gcsDao = new MockGoogleServicesDAO("test") {
+        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan): Future[ProjectBillingInfo] =
+          Future.failed(new RawlsException("You do not have access to this billing account or it does not exist."))
+      }
+
+      WorkspaceBillingAccountActor(dataSource, gcsDAO = gcsDao)
+        .updateBillingAccounts
+        .unsafeRunSync()
+
+      runAndWait {
+        for {
+          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+          billingProject <- rawlsBillingProjectQuery.load(testData.billingProject.projectName)
+          workspace <- workspaceQuery.findByIdOrFail(testData.v1Workspace.workspaceId)
+        } yield {
+          lastChange.value.googleSyncTime shouldBe defined
+          lastChange.value.outcome.value.isFailure shouldBe true
+
+          billingProject.value.invalidBillingAccount shouldBe true
+          billingProject.value.message shouldBe defined
+
+          workspace.billingAccountErrorMessage shouldBe defined
+          workspace.currentBillingAccountOnGoogleProject shouldBe testData.v1Workspace.currentBillingAccountOnGoogleProject
+        }
+      }
+    }
+
+  it should "not update v2 billing project validity when updating v2 workspaces" in
+    withEmptyTestDatabase { dataSource: SlickDataSource =>
+      runAndWait {
+        for {
+          _ <- rawlsBillingProjectQuery.create(testData.billingProject)
+          _ <- workspaceQuery.createOrUpdate(testData.workspace)
+          _ <- rawlsBillingProjectQuery.updateBillingAccount(
+            testData.billingProject.projectName,
+            billingAccount = RawlsBillingAccountName(UUID.randomUUID.toString).some,
+            testData.userOwner.userSubjectId
+          )
+        } yield ()
+      }
+
+      val gcsDao = new MockGoogleServicesDAO("test") {
+        override def rawlsCreatedGoogleProjectExists(projectId: GoogleProjectId): Future[Boolean] =
+          Future.successful(false)
+
+        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan): Future[ProjectBillingInfo] =
+          Future.failed(new RawlsException("You do not have access to this billing account or it does not exist."))
+      }
+
+      WorkspaceBillingAccountActor(dataSource, gcsDAO = gcsDao)
+        .updateBillingAccounts
+        .unsafeRunSync()
+
+      runAndWait {
+        for {
+          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+          billingProject <- rawlsBillingProjectQuery.load(testData.billingProject.projectName)
+          workspace <- workspaceQuery.findByIdOrFail(testData.workspace.workspaceId)
+        } yield {
+          lastChange.value.googleSyncTime shouldBe defined
+          lastChange.value.outcome.value.isSuccess shouldBe true
+
+          billingProject.value.invalidBillingAccount shouldBe false
+          billingProject.value.message shouldBe empty
+
+          workspace.billingAccountErrorMessage shouldBe defined
+          workspace.currentBillingAccountOnGoogleProject shouldBe testData.v1Workspace.currentBillingAccountOnGoogleProject
+        }
       }
     }
 }
