@@ -312,20 +312,6 @@ trait WorkspaceComponent {
       loadWorkspaces(workspaces)
     }
 
-    def listWorkspaceGoogleProjectsToUpdateWithNewBillingAccount(): ReadAction[Set[(GoogleProjectId, Option[RawlsBillingAccountName], Option[RawlsBillingAccountName])]] = {
-      val query = for {
-        billingProject <- rawlsBillingProjectQuery if !billingProject.invalidBillingAccount
-        workspace <- workspaceQuery if workspace.namespace === billingProject.projectName &&
-          workspace.billingAccountErrorMessage.isEmpty &&
-          (workspace.currentBillingAccountOnGoogleProject =!= billingProject.billingAccount ||
-            workspace.currentBillingAccountOnGoogleProject.isEmpty =!= billingProject.billingAccount.isEmpty)
-      } yield (workspace.googleProjectId, billingProject.billingAccount, workspace.currentBillingAccountOnGoogleProject)
-      query.result.map(results => results.map {
-        case (googleProjectId, newBillingAccount, fromWorkspaceBillingAccount) =>
-          (GoogleProjectId(googleProjectId), newBillingAccount.map(RawlsBillingAccountName), fromWorkspaceBillingAccount.map(RawlsBillingAccountName))
-      }.toSet)
-    }
-
     def updateWorkspaceBillingAccount(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): WriteAction[Int] = {
       findByGoogleProjectIdQuery(googleProjectId).map(_.currentBillingAccountOnGoogleProject).update(newBillingAccount.map(_.value))
     }

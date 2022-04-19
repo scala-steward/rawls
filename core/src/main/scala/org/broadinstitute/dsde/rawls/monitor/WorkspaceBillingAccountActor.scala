@@ -2,25 +2,23 @@ package org.broadinstitute.dsde.rawls.monitor
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
-import akka.http.scaladsl.model.StatusCodes
 import cats.Applicative
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.implicits._
 import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import com.typesafe.scalalogging.LazyLogging
+import org.broadinstitute.dsde.rawls.RawlsException
 import org.broadinstitute.dsde.rawls.dataaccess.slick.BillingAccountChange
 import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSource}
 import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
-import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 
 import java.sql.Timestamp
 import java.time.Instant
 import scala.concurrent.ExecutionContext.Implicits.{global => globalEc}
-import scala.concurrent.Future
 import scala.concurrent.duration._
 
 object WorkspaceBillingAccountActor {
@@ -73,7 +71,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
             // error messages from syncing v1 billing projects are also written to the v1 workspace
             // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
             workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
-              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).io.attempt else
+              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt else
               IO.pure(billingProjectSyncAttempt)
 
             _ <- recordWorkspaceSyncOutcome(workspace, billingProject.billingAccount,
@@ -100,7 +98,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     for {
       isV1BillingProject <- gcsDAO.rawlsCreatedGoogleProjectExists(project.googleProjectId).io
       _ <- Applicative[IO].whenA(isV1BillingProject)(
-        updateBillingAccountOnGoogle(project.googleProjectId, project.billingAccount).io
+        updateBillingAccountOnGoogle(project.googleProjectId, project.billingAccount)
       )
     } yield ()
 
@@ -112,12 +110,18 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
       _ <- dataSource.inTransaction { dataAccess =>
         import dataAccess.driver.api._
 
-        dataAccess
-          .billingAccountChangeQuery
-          .filter(_.id === change.id)
-          .map(c => (c.googleSyncTime, c.outcome, c.message))
-          .update((syncTime.some, outcomeString.some, message)
-          )
+        DBIO.seq(
+          dataAccess
+            .billingAccountChangeQuery
+            .filter(_.id === change.id)
+            .map(c => (c.googleSyncTime, c.outcome, c.message))
+            .update((syncTime.some, outcomeString.some, message)),
+          dataAccess
+            .rawlsBillingProjectQuery
+            .filter(_.projectName === change.billingProjectName.value)
+            .map(p => (p.invalidBillingAccount, p.message))
+            .update(outcome.isFailure, message)
+        )
       }.io
     } yield ()
 
@@ -135,47 +139,32 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     dataSource.inTransaction { dataAccess =>
       import dataAccess.driver.api._
 
-      dataAccess
+      val wsQuery = dataAccess
         .workspaceQuery
         .filter(_.id === workspace.workspaceIdAsUUID)
-        .map(w => (w.currentBillingAccountOnGoogleProject, w.billingAccountErrorMessage))
-        .update(billingAccount.map(_.value), outcome match {
+
+      DBIO.seq(
+        if (outcome.isSuccess)
+          wsQuery.map(_.currentBillingAccountOnGoogleProject).update(billingAccount.map(_.value)) else
+          DBIO.successful(),
+        wsQuery.map(_.billingAccountErrorMessage).update(outcome match {
           case Success => None
-          case Failure(message) => Some(message)
+          case Failure(message) => Some(
+            s"""Failed to set workspace Google Project "${workspace.googleProjectId}" Billing Account to "$billingAccount": "$message"."""
+          )
         })
+      )
     }.io.void
 
 
-  private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): Future[Unit] = {
-    val updateGoogleResult = for {
-      projectBillingInfo <- gcsDAO.getBillingInfoForGoogleProject(googleProjectId)
+  private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): IO[Unit] =
+    for {
+      projectBillingInfo <- gcsDAO.getBillingInfoForGoogleProject(googleProjectId).io
       currentBillingAccountOnGoogle = getBillingAccountOption(projectBillingInfo)
-      _ <- if (newBillingAccount != currentBillingAccountOnGoogle) {
+      _ <- Applicative[IO].whenA(newBillingAccount != currentBillingAccountOnGoogle) {
         setBillingAccountOnGoogleProject(googleProjectId, newBillingAccount)
-      } else {
-        logger.info(s"Not updating Billing Account on Google Project ${googleProjectId} because currentBillingAccountOnGoogle:${currentBillingAccountOnGoogle} is the same as the newBillingAccount:${newBillingAccount}")
-        Future.successful()
       }
     } yield ()
-
-    updateGoogleResult.recoverWith {
-      case e: RawlsExceptionWithErrorReport if e.errorReport.statusCode == Option(StatusCodes.Forbidden) && newBillingAccount.isDefined =>
-        val message = s"Rawls does not have permission to set the Billing Account on ${googleProjectId} to ${newBillingAccount.get}"
-        dataSource.inTransaction({ dataAccess =>
-          dataAccess.rawlsBillingProjectQuery.updateBillingAccountValidity(newBillingAccount.get, isInvalid = true) >>
-            dataAccess.workspaceQuery.updateWorkspaceBillingAccountErrorMessages(googleProjectId, s"${message} ${e.getMessage}")
-        }).flatMap { _ =>
-          logger.warn(message, e)
-          Future.failed(e)
-        }
-      case e: Throwable =>
-        dataSource.inTransaction { dataAccess =>
-          dataAccess.workspaceQuery.updateWorkspaceBillingAccountErrorMessages(googleProjectId, e.getMessage)
-        }.flatMap { _ =>
-          Future.failed(e)
-        }
-    }
-  }
 
   /**
     * Explicitly sets the Billing Account value on the given Google Project.  Any logic or conditionals controlling
@@ -185,10 +174,10 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     * @param newBillingAccount
     */
   private def setBillingAccountOnGoogleProject(googleProjectId: GoogleProjectId,
-                                               newBillingAccount: Option[RawlsBillingAccountName]): Future[ProjectBillingInfo] =
+                                               newBillingAccount: Option[RawlsBillingAccountName]): IO[ProjectBillingInfo] =
     newBillingAccount match {
-      case Some(billingAccount) => gcsDAO.setBillingAccountName(googleProjectId, billingAccount)
-      case None => gcsDAO.disableBillingOnGoogleProject(googleProjectId)
+      case Some(billingAccount) => gcsDAO.setBillingAccountName(googleProjectId, billingAccount).io
+      case None => gcsDAO.disableBillingOnGoogleProject(googleProjectId).io
     }
 
 

@@ -13,15 +13,23 @@ import spray.json.{DeserializationException, JsObject, JsString, JsValue, RootJs
 
 import scala.collection.immutable.Map
 import scala.concurrent.Future
-import scala.language.higherKinds
 
 object MigrationUtils {
-  sealed trait Outcome
+  sealed trait Outcome {
+    def isSuccess: Boolean
+    def isFailure: Boolean
+  }
 
   object Outcome {
-    case object Success extends Outcome
+    case object Success extends Outcome {
+      override def isSuccess: Boolean = true
+      override def isFailure: Boolean = false
+    }
 
-    final case class Failure(message: String) extends Outcome
+    final case class Failure(message: String) extends Outcome {
+      override def isSuccess: Boolean = false
+      override def isFailure: Boolean = true
+    }
 
     final def fromFields(outcome: Option[String], message: Option[String]): Either[String, Option[Outcome]] =
       outcome.traverse[Either[String, *], Outcome] {
