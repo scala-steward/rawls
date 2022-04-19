@@ -2,6 +2,7 @@ package org.broadinstitute.dsde.rawls.monitor
 
 import akka.http.scaladsl.model.StatusCodes
 import cats.effect.unsafe.implicits.global
+import cats.implicits.catsSyntaxOptionId
 import com.google.api.services.cloudbilling.model.ProjectBillingInfo
 import io.opencensus.trace.{Span => OpenCensusSpan}
 import org.broadinstitute.dsde.rawls.dataaccess._
@@ -18,6 +19,7 @@ import org.scalatestplus.mockito.MockitoSugar
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.{postfixOps, reflectiveCalls}
@@ -390,15 +392,25 @@ class WorkspaceBillingAccountActorSpec
           _ <- rawlsBillingProjectQuery.create(testData.billingProject)
           _ <- rawlsBillingProjectQuery.updateBillingAccount(
             testData.billingProject.projectName,
-            billingAccount = None,
+            billingAccount = RawlsBillingAccountName("my-fancy-billing-account").some,
             testData.userOwner.userSubjectId
           )
         } yield ()
       }
 
-      WorkspaceBillingAccountActor(dataSource, gcsDAO = new MockGoogleServicesDAO("test"))
+      val gcsDao = new MockGoogleServicesDAO("test") {
+        val timesCalled = new AtomicInteger(0)
+        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan): Future[ProjectBillingInfo] = {
+          timesCalled.incrementAndGet()
+          super.setBillingAccountName(googleProjectId, billingAccountName, span)
+        }
+      }
+
+      WorkspaceBillingAccountActor(dataSource, gcsDAO = gcsDao)
         .updateBillingAccounts
         .unsafeRunSync()
+
+      gcsDao.timesCalled.get() shouldBe 1
 
       runAndWait {
         for {
