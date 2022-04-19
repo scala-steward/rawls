@@ -56,7 +56,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
-        _ <- recordBillingAccountSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
+        _ <- recordBillingProjectSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
         _ <- listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
           for {
             // error messages from syncing v1 billing projects are also written to the v1 workspace
@@ -65,7 +65,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
               updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).io.attempt else
               IO.pure(billingProjectSyncAttempt)
 
-            _ <- recordWorkspaceSyncAttempt(workspace, billingProject.billingAccount,
+            _ <- recordWorkspaceSyncOutcome(workspace, billingProject.billingAccount,
               Outcome.fromEither(workspaceSyncAttempt)
             )
           } yield ()
@@ -94,7 +94,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     } yield ()
 
 
-  private def recordBillingAccountSyncOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
+  private def recordBillingProjectSyncOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
     for {
       syncTime <- IO(Timestamp.from(Instant.now))
       (outcomeString, message) = Outcome.toTuple(outcome)
@@ -118,7 +118,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
       .map(_.toList)
 
 
-  private def recordWorkspaceSyncAttempt(workspace: Workspace,
+  private def recordWorkspaceSyncOutcome(workspace: Workspace,
                                          billingAccount: Option[RawlsBillingAccountName],
                                          outcome: Outcome): IO[Unit] =
     dataSource.inTransaction { dataAccess =>
