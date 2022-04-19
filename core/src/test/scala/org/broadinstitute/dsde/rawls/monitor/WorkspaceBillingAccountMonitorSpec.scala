@@ -16,8 +16,10 @@ import org.scalatest.OptionValues
 import org.scalatestplus.mockito.MockitoSugar
 
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.language.postfixOps
+import scala.language.{postfixOps, reflectiveCalls}
+
 
 class WorkspaceBillingAccountMonitorSpec
   extends TestDriverComponentWithFlatSpecAndMatchers
@@ -31,7 +33,7 @@ class WorkspaceBillingAccountMonitorSpec
   val defaultBillingAccountName: RawlsBillingAccountName = RawlsBillingAccountName("test-ba")
 
 
-  "WorkspaceBillingAccountActor" should "update the billing account on all v1 and v2 workspaces in a billing project" in 
+  "WorkspaceBillingAccountActor" should "update the billing account on all v1 and v2 workspaces in a billing project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val billingAccountName = defaultBillingAccountName
       val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, Option(billingAccountName), None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -58,14 +60,14 @@ class WorkspaceBillingAccountMonitorSpec
         .updateBillingAccounts
         .unsafeRunSync
 
-      every (
+      every(
         runAndWait(workspaceQuery.listWithBillingProject(billingProject.projectName))
           .map(_.currentBillingAccountOnGoogleProject)
       ) shouldBe Some(newBillingAccount)
     }
-  
 
-  it should "not endlessly retry when it fails to get billing info for the google project" in 
+
+  it should "not endlessly retry when it fails to get billing info for the google project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccount = Option(defaultBillingAccountName)
       val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -80,24 +82,28 @@ class WorkspaceBillingAccountMonitorSpec
       }
 
       val exceptionMessage = "oh what a shame!  It went kerplooey!"
-      val failingGcsDao = spy(new MockGoogleServicesDAO("") {
-        override def getBillingInfoForGoogleProject(googleProjectId: GoogleProjectId)(implicit executionContext: ExecutionContext): Future[ProjectBillingInfo] =
+      val timesCalled = new ConcurrentHashMap[GoogleProjectId, Int]()
+      val failingGcsDao = new MockGoogleServicesDAO("") {
+        override def getBillingInfoForGoogleProject(googleProjectId: GoogleProjectId)(implicit executionContext: ExecutionContext): Future[ProjectBillingInfo] = {
+          timesCalled.merge(googleProjectId, 1, _ + _)
           Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(exceptionMessage)))
-      })
+        }
+      }
 
       WorkspaceBillingAccountActor(dataSource, gcsDAO = failingGcsDao)
         .updateBillingAccounts
         .unsafeRunSync
 
-      runAndWait(workspaceQuery.findByName(workspace.toWorkspaceName))
-        .getOrElse(fail("workspace not found"))
+      runAndWait(workspaceQuery.findByIdOrFail(workspace.workspaceId))
         .billingAccountErrorMessage.value should include(exceptionMessage)
 
-      verify(failingGcsDao, times(1)).getBillingInfoForGoogleProject(workspace.googleProjectId)
+      timesCalled.size() shouldBe 2
+      timesCalled.get(workspace.googleProjectId) shouldBe 1
+      timesCalled.get(billingProject.googleProjectId) shouldBe 1
     }
-  
 
-  it should "not endlessly retry when it fails to set billing info for the google project" in 
+
+  it should "not endlessly retry when it fails to set billing info for the google project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccount = Option(defaultBillingAccountName)
       val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -112,10 +118,13 @@ class WorkspaceBillingAccountMonitorSpec
       }
 
       val exceptionMessage = "oh what a shame!  It went kerplooey!"
-      val failingGcsDao = spy(new MockGoogleServicesDAO("") {
-        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan = null): Future[ProjectBillingInfo] =
+      val timesCalled = new ConcurrentHashMap[GoogleProjectId, Int]()
+      val failingGcsDao = new MockGoogleServicesDAO("") {
+        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan = null): Future[ProjectBillingInfo] = {
+          timesCalled.merge(googleProjectId, 1, _ + _)
           Future.failed(new RawlsException(exceptionMessage))
-      })
+        }
+      }
 
       WorkspaceBillingAccountActor(dataSource, gcsDAO = failingGcsDao)
         .updateBillingAccounts
@@ -125,11 +134,13 @@ class WorkspaceBillingAccountMonitorSpec
         .getOrElse(fail("workspace not found"))
         .billingAccountErrorMessage.value should include(exceptionMessage)
 
-      verify(failingGcsDao, times(1)).getBillingInfoForGoogleProject(workspace.googleProjectId)
+      timesCalled.size() shouldBe 2
+      timesCalled.get(workspace.googleProjectId) shouldBe 1
+      timesCalled.get(billingProject.googleProjectId) shouldBe 1
     }
-  
 
-  it should "not try to update the billing account if the new value is the same as the old value" in 
+
+  it should "not try to update the billing account if the new value is the same as the old value" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccountName = defaultBillingAccountName
       val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, Option(originalBillingAccountName), None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -158,9 +169,9 @@ class WorkspaceBillingAccountMonitorSpec
 
       verify(mockGcsDAO, times(0)).setBillingAccountName(workspace.googleProjectId, originalBillingAccountName)
     }
-  
 
-  it should "continue to update other workspace google projects even if one fails to update" in 
+
+  it should "continue to update other workspace google projects even if one fails to update" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccount = Option(defaultBillingAccountName)
       val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -200,7 +211,7 @@ class WorkspaceBillingAccountMonitorSpec
         workspaceQuery
           .findByIdOrFail(workspace.workspaceId)
           .map(ws => (ws.currentBillingAccountOnGoogleProject, ws.billingAccountErrorMessage))
-          
+
       runAndWait {
         for {
           (ws1BillingAccountOnGoogleProject, _) <- getBillingAccountOnGoogleProject(workspace1)
@@ -213,15 +224,15 @@ class WorkspaceBillingAccountMonitorSpec
         }
       }
     }
-  
+
 
   // TODO: CA-1235 Remove during cleanup once all workspaces have their own Google project
-  it should "propagate error messages to all workspaces in a Google project" in 
+  it should "propagate error messages to all workspaces in a Google project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccount = Option(RawlsBillingAccountName("original-ba"))
       val billingProject = RawlsBillingProject(RawlsBillingProjectName("v1-Billing-Project"), CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
       val v1GoogleProjectId = GoogleProjectId(billingProject.projectName.value)
-      val firstV1Workspace  = Workspace(billingProject.projectName.value, "first-v1-workspace",  UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V1, v1GoogleProjectId, billingProject.googleProjectNumber, originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
+      val firstV1Workspace = Workspace(billingProject.projectName.value, "first-v1-workspace", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V1, v1GoogleProjectId, billingProject.googleProjectNumber, originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
       val secondV1Workspace = Workspace(billingProject.projectName.value, "second-v1-workspace", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V1, v1GoogleProjectId, billingProject.googleProjectNumber, originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
       val v2Workspace = Workspace(billingProject.projectName.value, "v2 workspace", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V2, GoogleProjectId("v2WorkspaceGoogleProject"), Option(GoogleProjectNumber("43")), originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
 
@@ -260,7 +271,7 @@ class WorkspaceBillingAccountMonitorSpec
           firstV1WsError <- getBillingAccountErrorMessage(firstV1Workspace)
           secondV1WsError <- getBillingAccountErrorMessage(secondV1Workspace)
           v2WsError <- getBillingAccountErrorMessage(v2Workspace)
-        } yield  {
+        } yield {
           firstV1WsError.value should include(exceptionMessage)
           secondV1WsError.value should include(exceptionMessage)
           v2WsError shouldBe empty
@@ -308,7 +319,7 @@ class WorkspaceBillingAccountMonitorSpec
           workspaces <- workspaceQuery.listWithBillingProject(billingProject.projectName)
         } yield {
           project.value.invalidBillingAccount shouldBe true
-          every (workspaces.map(_.billingAccountErrorMessage.value)) should include(exceptionMessage)
+          every(workspaces.map(_.billingAccountErrorMessage.value)) should include(exceptionMessage)
         }
       }
     }
