@@ -196,10 +196,10 @@ class WorkspaceBillingAccountMonitorSpec
         .updateBillingAccounts
         .unsafeRunSync
 
-      def getBillingAccountOnGoogleProject(workspace: Workspace): ReadAction[(Option[String], Option[String])] =
+      def getBillingAccountOnGoogleProject(workspace: Workspace) =
         workspaceQuery
           .findByIdOrFail(workspace.workspaceId)
-          .map(ws => (ws.currentBillingAccountOnGoogleProject.map(_.toString), ws.billingAccountErrorMessage))
+          .map(ws => (ws.currentBillingAccountOnGoogleProject, ws.billingAccountErrorMessage))
           
       runAndWait {
         for {

@@ -14,6 +14,7 @@ import org.broadinstitute.dsde.rawls.dataaccess.{GoogleServicesDAO, SlickDataSou
 import org.broadinstitute.dsde.rawls.model.{GoogleProjectId, RawlsBillingAccountName, RawlsBillingProject, RawlsBillingProjectName, Workspace}
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.FutureToIO
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
+import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
 import org.broadinstitute.dsde.rawls.{RawlsException, RawlsExceptionWithErrorReport}
 
 import java.sql.Timestamp
@@ -54,19 +55,27 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     getBillingProjectChanges.flatMap(_.traverse_ { billingAccountChange =>
       for {
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
-        syncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
-        _ <- recordBillingAccountSyncOutcome(billingAccountChange, Outcome.fromEither(syncAttempt))
-        _ <- Applicative[IO].whenA(syncAttempt.isRight) {
-          updateWorkspacesInBillingProject(billingProject)
-        }
+        billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
+        _ <- recordBillingAccountSyncOutcome(billingAccountChange, Outcome.fromEither(billingProjectSyncAttempt))
+        _ <- listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
+          for {
+            // error messages from syncing v1 billing projects are also written to the v1 workspace
+            // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
+            workspaceSyncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
+              updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).io.attempt else
+              IO.pure(billingProjectSyncAttempt)
+
+            _ <- recordWorkspaceSyncAttempt(workspace, billingProject.billingAccount,
+              Outcome.fromEither(workspaceSyncAttempt)
+            )
+          } yield ()
+        })
       } yield ()
     })
 
 
   private def getBillingProjectChanges: IO[List[BillingAccountChange]] =
-    dataSource.inTransaction {
-      _.billingAccountChangeQuery.getLatestChanges
-    }.io.map(_.toList)
+    dataSource.inTransaction(_.billingAccountChangeQuery.getLatestChanges).io.map(_.toList)
 
 
   private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
@@ -102,34 +111,28 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     } yield ()
 
 
-  private def updateWorkspacesInBillingProject(billingProject: RawlsBillingProject): IO[Unit] =
-    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
-      for {
-        syncAttempt <- if (workspace.googleProjectId != billingProject.googleProjectId)
-          updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).io.attempt else
-          IO.pure(Right())
-
-        _ <- dataSource.inTransaction { dataAccess =>
-          import dataAccess.driver.api._
-
-          dataAccess
-            .workspaceQuery
-            .filter(_.id === workspace.workspaceIdAsUUID)
-            .map(w => (w.currentBillingAccountOnGoogleProject, w.billingAccountErrorMessage))
-            .update(billingProject.billingAccount.map(_.value), syncAttempt match {
-              case Right(_) => None
-              case Left(throwable) => Option(throwable.getMessage)
-            })
-        }.io
-      } yield ()
-    })
-
-
   private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] =
     dataSource
       .inTransaction(_.workspaceQuery.listWithBillingProject(billingProjectName))
       .io
       .map(_.toList)
+
+
+  private def recordWorkspaceSyncAttempt(workspace: Workspace,
+                                         billingAccount: Option[RawlsBillingAccountName],
+                                         outcome: Outcome): IO[Unit] =
+    dataSource.inTransaction { dataAccess =>
+      import dataAccess.driver.api._
+
+      dataAccess
+        .workspaceQuery
+        .filter(_.id === workspace.workspaceIdAsUUID)
+        .map(w => (w.currentBillingAccountOnGoogleProject, w.billingAccountErrorMessage))
+        .update(billingAccount.map(_.value), outcome match {
+          case Success => None
+          case Failure(message) => Some(message)
+        })
+  }.io.void
 
 
   private def updateBillingAccountOnGoogle(googleProjectId: GoogleProjectId, newBillingAccount: Option[RawlsBillingAccountName]): Future[Unit] = {
