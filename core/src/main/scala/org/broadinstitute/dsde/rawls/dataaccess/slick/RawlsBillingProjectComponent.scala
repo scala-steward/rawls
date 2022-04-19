@@ -313,7 +313,7 @@ trait RawlsBillingProjectComponent {
     }
 
     def toRecord(billingAccountChange: BillingAccountChange): RecordType = {
-      val outcome = billingAccountChange.outcome.map(Outcome.toTuple)
+      val (outcome, message) = Outcome.toFields(billingAccountChange.outcome)
       (
         billingAccountChange.id,
         billingAccountChange.billingProjectName.value,
@@ -322,8 +322,8 @@ trait RawlsBillingProjectComponent {
         billingAccountChange.newBillingAccount.map(_.value),
         Timestamp.from(billingAccountChange.created),
         billingAccountChange.googleSyncTime.map(Timestamp.from),
-        outcome.map(_._1),
-        outcome.flatMap(_._2)
+        outcome,
+        message
       )
     }
   }
