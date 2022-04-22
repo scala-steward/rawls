@@ -2,6 +2,7 @@ package org.broadinstitute.dsde.rawls.monitor
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
+import akka.http.scaladsl.model.StatusCodes.Forbidden
 import cats.Applicative
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
@@ -16,9 +17,7 @@ import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Implicits.
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome
 import org.broadinstitute.dsde.rawls.monitor.migration.MigrationUtils.Outcome.{Failure, Success}
 
-import java.sql.Timestamp
 import java.time.Instant
-import scala.concurrent.ExecutionContext.Implicits.{global => globalEc}
 import scala.concurrent.duration._
 
 object WorkspaceBillingAccountActor {
@@ -48,6 +47,9 @@ object WorkspaceBillingAccountActor {
 
 final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDAO: GoogleServicesDAO)
   extends LazyLogging {
+
+  import dataSource.dataAccess._
+  import dataSource.dataAccess.driver.api._
 
   /* Sync billing account changes to billing projects and their associated workspaces with Google
    * one at a time.
@@ -79,12 +81,14 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
 
   def getABillingProjectChange: IO[Option[BillingAccountChange]] =
-    dataSource.inTransaction(_.billingAccountChangeQuery.getLatestChanges.map(_.headOption)).io
+    dataSource
+      .inTransaction(_ => BillingAccountChanges.latestChanges.take(1).result).io
+      .map(_.headOption)
 
 
   private def loadBillingProject(projectName: RawlsBillingProjectName): IO[RawlsBillingProject] =
     dataSource
-      .inTransaction(_.rawlsBillingProjectQuery.load(projectName))
+      .inTransaction( _ => rawlsBillingProjectQuery.load(projectName))
       .io
       .map(_.getOrElse(throw new RawlsException(s"No such billing account $projectName")))
 
@@ -100,8 +104,8 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
   private def recordBillingProjectSyncOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
     for {
-      syncTime <- IO(Timestamp.from(Instant.now))
-      (outcomeString, message) = Outcome.toTuple(outcome)
+      syncTime <- IO(Instant.now)
+      (_, message) = Outcome.toTuple(outcome)
       baseInfo = Seq(
         "changeId" -> change.id,
         "billingProject" -> change.billingProjectName.value,
@@ -112,20 +116,14 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         info("Successfully updated Billing Account on Billing Project in Google", baseInfo :_*) else
         warn("Failed to update Billing Account on Billing Project in Google", ("details" -> message) +: baseInfo :_*)
 
-      _ <- dataSource.inTransaction { dataAccess =>
-        import dataAccess.driver.api._
-
+      _ <- dataSource.inTransaction { _ =>
+        val thisChange = BillingAccountChanges.withId(change.id)
+        val thisBillingProject = rawlsBillingProjectQuery.withProjectName(change.billingProjectName)
         DBIO.seq(
-          dataAccess
-            .billingAccountChangeQuery
-            .filter(_.id === change.id)
-            .map(c => (c.googleSyncTime, c.outcome, c.message))
-            .update((syncTime.some, outcomeString.some, message)),
-          dataAccess
-            .rawlsBillingProjectQuery
-            .filter(_.projectName === change.billingProjectName.value)
-            .map(p => (p.invalidBillingAccount, p.message))
-            .update(outcome.isFailure, message)
+          thisChange.setGoogleSyncTime(syncTime.some),
+          thisChange.setOutcome(outcome.some),
+          thisBillingProject.setInvalidBillingAccount(message.exists(_.contains(Forbidden.value))),
+          thisBillingProject.setMessage(message)
         )
       }.io
     } yield ()
@@ -193,18 +191,14 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
           )
       }
 
-      _ <- dataSource.inTransaction { dataAccess =>
-        import dataAccess.driver.api._
-
-        val wsQuery = dataAccess
-          .workspaceQuery
-          .filter(_.id === workspace.workspaceIdAsUUID)
+      _ <- dataSource.inTransaction { _ =>
+        val wsQuery = workspaceQuery.withWorkspaceId(workspace.workspaceIdAsUUID)
 
         DBIO.seq(
           if (outcome.isSuccess)
-            wsQuery.map(_.currentBillingAccountOnGoogleProject).update(billingAccount.map(_.value)) else
+            wsQuery.setCurrentBillingAccountOnGoogleProject(billingAccount) else
             DBIO.successful(),
-          wsQuery.map(_.billingAccountErrorMessage).update(failureMessage)
+          wsQuery.setBillingAccountErrorMessage(failureMessage)
         )
       }.io
     } yield ()

@@ -146,8 +146,9 @@ trait WorkspaceComponent {
 
   }
 
+  type WorkspaceQueryType = driver.api.Query[WorkspaceTable, WorkspaceRecord, Seq]
+
   object workspaceQuery extends TableQuery(new WorkspaceTable(_)) {
-    private type WorkspaceQueryType = driver.api.Query[WorkspaceTable, WorkspaceRecord, Seq]
 
     def listAll(): ReadAction[Seq[Workspace]] = {
       loadWorkspaces(workspaceQuery)
@@ -473,6 +474,19 @@ trait WorkspaceComponent {
     private def unmarshalWorkspace(workspaceRec: WorkspaceRecord, attributes: AttributeMap): Workspace = {
       Workspace(workspaceRec.namespace, workspaceRec.name, workspaceRec.id.toString, workspaceRec.bucketName, workspaceRec.workflowCollection, new DateTime(workspaceRec.createdDate), new DateTime(workspaceRec.lastModified), workspaceRec.createdBy, attributes, workspaceRec.isLocked, WorkspaceVersions.fromStringThrows(workspaceRec.workspaceVersion), GoogleProjectId(workspaceRec.googleProjectId), workspaceRec.googleProjectNumber.map(GoogleProjectNumber), workspaceRec.currentBillingAccountOnGoogleProject.map(RawlsBillingAccountName), workspaceRec.billingAccountErrorMessage, workspaceRec.completedCloneWorkspaceFileTransfer.map(timestamp => new DateTime(timestamp)), WorkspaceType.withName(workspaceRec.workspaceType))
     }
+  }
+
+  implicit class WorkspaceExtensions(query: WorkspaceQueryType) {
+    // filters
+    def withWorkspaceId(workspaceId: UUID): WorkspaceQueryType =
+      query.filter(_.id === workspaceId)
+
+    // setters
+    def setCurrentBillingAccountOnGoogleProject(billingAccount: Option[RawlsBillingAccountName]): WriteAction[Int] =
+      query.map(_.currentBillingAccountOnGoogleProject).update(billingAccount.map(_.value))
+
+    def setBillingAccountErrorMessage(message: Option[String]): WriteAction[Int] =
+      query.map(_.billingAccountErrorMessage).update(message)
   }
 
   private def groupByWorkspaceId(runningSubmissions: Seq[(UUID, Int)]): Map[UUID, Int] = {

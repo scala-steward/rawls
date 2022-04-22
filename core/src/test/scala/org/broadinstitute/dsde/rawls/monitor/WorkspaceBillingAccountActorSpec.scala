@@ -36,6 +36,8 @@ class WorkspaceBillingAccountActorSpec
   val defaultBillingProjectName: RawlsBillingProjectName = RawlsBillingProjectName("test-bp")
   val defaultBillingAccountName: RawlsBillingAccountName = RawlsBillingAccountName("test-ba")
 
+  import driver.api._
+
 
   "WorkspaceBillingAccountActor" should "update the billing account on all v1 and v2 workspaces in a billing project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
@@ -252,13 +254,10 @@ class WorkspaceBillingAccountActorSpec
 
       val exceptionMessage = "oh what a shame!  It went kerplooey!"
       val failingGcsDao = spy(new MockGoogleServicesDAO("") {
-        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan = null): Future[ProjectBillingInfo] = {
-          if (googleProjectId == v1GoogleProjectId) {
-            Future.failed(new RawlsException(exceptionMessage))
-          } else {
+        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan = null): Future[ProjectBillingInfo] =
+          if (googleProjectId == v1GoogleProjectId)
+            Future.failed(new RawlsException(exceptionMessage)) else
             super.getBillingInfoForGoogleProject(googleProjectId)
-          }
-        }
       })
 
       WorkspaceBillingAccountActor(dataSource, gcsDAO = failingGcsDao)
@@ -357,10 +356,8 @@ class WorkspaceBillingAccountActorSpec
         _ <- actor.updateBillingAccounts
         billingProjectUpdatesAfter <- actor.getABillingProjectChange
 
-        lastChange :: previousChanges <- dataSource.inTransaction { dataAccess =>
-          import dataAccess.driver.api._
-          dataAccess
-            .billingAccountChangeQuery
+        lastChange :: previousChanges <- dataSource.inTransaction { _ =>
+          BillingAccountChanges
             .filter(_.billingProjectName === testData.billingProject.projectName.value)
             .sortBy(_.id.desc)
             .result
@@ -412,7 +409,7 @@ class WorkspaceBillingAccountActorSpec
 
       runAndWait {
         for {
-          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+          lastChange <- BillingAccountChanges.getLastChange(testData.billingProject.projectName)
         } yield lastChange.value.googleSyncTime shouldBe defined
       }
     }
@@ -442,7 +439,7 @@ class WorkspaceBillingAccountActorSpec
 
       runAndWait {
         for {
-          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+          lastChange <- BillingAccountChanges.getLastChange(testData.billingProject.projectName)
           billingProject <- rawlsBillingProjectQuery.load(testData.billingProject.projectName)
           workspace <- workspaceQuery.findByIdOrFail(testData.v1Workspace.workspaceId)
         } yield {
@@ -486,7 +483,7 @@ class WorkspaceBillingAccountActorSpec
 
       runAndWait {
         for {
-          lastChange <- billingAccountChangeQuery.getLastChange(testData.billingProject.projectName)
+          lastChange <- BillingAccountChanges.getLastChange(testData.billingProject.projectName)
           billingProject <- rawlsBillingProjectQuery.load(testData.billingProject.projectName)
           workspace <- workspaceQuery.findByIdOrFail(testData.workspace.workspaceId)
         } yield {
