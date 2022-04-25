@@ -2,7 +2,6 @@ package org.broadinstitute.dsde.rawls.monitor
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
-import akka.http.scaladsl.model.StatusCodes.Forbidden
 import cats.Applicative
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
@@ -72,9 +71,10 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         )
 
         billingProject <- loadBillingProject(billingAccountChange.billingProjectName)
+        billingProbeHasAccess <- billingProject.billingAccount.traverse(gcsDAO.testDMBillingAccountAccess(_).io)
         billingProjectSyncAttempt <- syncBillingProjectWithGoogle(billingProject).attempt
         syncOutcome = Outcome.fromEither(billingProjectSyncAttempt)
-        _ <- recordBillingProjectSyncOutcome(billingAccountChange, syncOutcome)
+        _ <- recordBillingProjectSyncOutcome(billingAccountChange, billingProbeHasAccess, syncOutcome)
         _ <- updateWorkspacesInProject(billingAccountChange, billingProject, syncOutcome)
       } yield ()
     })
@@ -82,7 +82,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
   def getABillingProjectChange: IO[Option[BillingAccountChange]] =
     dataSource
-      .inTransaction(_ => BillingAccountChanges.latestChanges.take(1).result).io
+      .inTransaction(_ => BillingAccountChanges.latestChanges.unsynced.take(1).result).io
       .map(_.headOption)
 
 
@@ -95,6 +95,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
   private def syncBillingProjectWithGoogle(project: RawlsBillingProject): IO[Unit] =
     for {
+      // only v1 billing projects are backed by google projects
       isV1BillingProject <- gcsDAO.rawlsCreatedGoogleProjectExists(project.googleProjectId).io
       _ <- Applicative[IO].whenA(isV1BillingProject)(
         updateBillingAccountOnGoogle(project.googleProjectId, project.billingAccount)
@@ -102,16 +103,19 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     } yield ()
 
 
-  private def recordBillingProjectSyncOutcome(change: BillingAccountChange, outcome: Outcome): IO[Unit] =
+  private def recordBillingProjectSyncOutcome(change: BillingAccountChange,
+                                              billingProbeCanAccessBillingAccount: Option[Boolean],
+                                              outcome: Outcome): IO[Unit] =
     for {
       syncTime <- IO(Instant.now)
-      (_, message) = Outcome.toTuple(outcome)
+
       baseInfo = Seq(
         "changeId" -> change.id,
         "billingProject" -> change.billingProjectName.value,
         "newBillingAccount" -> change.newBillingAccount.map(_.value)
       )
 
+      (_, message) = Outcome.toTuple(outcome)
       _ <- if (outcome.isSuccess)
         info("Successfully updated Billing Account on Billing Project in Google", baseInfo :_*) else
         warn("Failed to update Billing Account on Billing Project in Google", ("details" -> message) +: baseInfo :_*)
@@ -122,7 +126,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         DBIO.seq(
           thisChange.setGoogleSyncTime(syncTime.some),
           thisChange.setOutcome(outcome.some),
-          thisBillingProject.setInvalidBillingAccount(message.exists(_.contains(Forbidden.value))),
+          thisBillingProject.setInvalidBillingAccount(!billingProbeCanAccessBillingAccount.getOrElse(true)),
           thisBillingProject.setMessage(message)
         )
       }.io
@@ -219,7 +223,6 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
         billingAccount,
         failureMessage
       )
-
     } yield ()
 
 
@@ -259,7 +262,7 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     * @return
     */
   private def getBillingAccountOption(projectBillingInfo: ProjectBillingInfo): Option[RawlsBillingAccountName] =
-    Option(projectBillingInfo.getBillingAccountName).filter(_.isBlank).map(RawlsBillingAccountName)
+    Option(projectBillingInfo.getBillingAccountName).filter(!_.isBlank).map(RawlsBillingAccountName)
 
 
   private def info(message: String, data: (String, Any)*) : IO[Unit] =

@@ -148,21 +148,23 @@ class WorkspaceBillingAccountActorSpec
 
   it should "not try to update the billing account if the new value is the same as the old value" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
-      val originalBillingAccountName = defaultBillingAccountName
-      val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, Option(originalBillingAccountName), None, googleProjectNumber = Option(defaultGoogleProjectNumber))
-      val workspace = Workspace(billingProject.projectName.value, "whatever", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V2, GoogleProjectId("any old project"), Option(GoogleProjectNumber("44")), Option(originalBillingAccountName), None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
+      val originalBillingAccount = Some(defaultBillingAccountName)
+      val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
+      val workspace = Workspace(billingProject.projectName.value, "whatever", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V2, GoogleProjectId("any old project"), Option(GoogleProjectNumber("44")), originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
 
       runAndWait {
         for {
           _ <- rawlsBillingProjectQuery.create(billingProject)
           _ <- workspaceQuery.createOrUpdate(workspace)
-          _ <- rawlsBillingProjectQuery.updateBillingAccount(billingProject.projectName, Option(originalBillingAccountName), testData.userOwner.userSubjectId)
+          // database rejects updating billing project with same billing account
+          _ <- rawlsBillingProjectQuery.updateBillingAccount(billingProject.projectName, None, testData.userOwner.userSubjectId)
+          _ <- rawlsBillingProjectQuery.updateBillingAccount(billingProject.projectName, originalBillingAccount, testData.userOwner.userSubjectId)
         } yield ()
       }
 
       val mockGcsDAO = spy(new MockGoogleServicesDAO("") {
         override def getBillingInfoForGoogleProject(googleProjectId: GoogleProjectId)(implicit executionContext: ExecutionContext): Future[ProjectBillingInfo] =
-          Future.successful(new ProjectBillingInfo().setBillingAccountName(originalBillingAccountName.value).setBillingEnabled(true))
+          Future.successful(new ProjectBillingInfo().setBillingAccountName(originalBillingAccount.value.value).setBillingEnabled(true))
       })
 
       WorkspaceBillingAccountActor(dataSource, gcsDAO = mockGcsDAO)
@@ -171,9 +173,9 @@ class WorkspaceBillingAccountActorSpec
 
       runAndWait(workspaceQuery.findByName(workspace.toWorkspaceName))
         .getOrElse(fail("workspace not found"))
-        .currentBillingAccountOnGoogleProject.value shouldBe originalBillingAccountName
+        .currentBillingAccountOnGoogleProject shouldBe originalBillingAccount
 
-      verify(mockGcsDAO, times(0)).setBillingAccountName(workspace.googleProjectId, originalBillingAccountName)
+      verify(mockGcsDAO, times(0)).setBillingAccountName(workspace.googleProjectId, originalBillingAccount.value)
     }
 
 
@@ -231,7 +233,7 @@ class WorkspaceBillingAccountActorSpec
 
 
   // TODO: CA-1235 Remove during cleanup once all workspaces have their own Google project
-  it should "propagate error messages to all workspaces in a Google project" in
+  it should "propagate error messages to all v1 workspaces in a billing project" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       val originalBillingAccount = Option(RawlsBillingAccountName("original-ba"))
       val billingProject = RawlsBillingProject(RawlsBillingProjectName("v1-Billing-Project"), CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
@@ -283,46 +285,6 @@ class WorkspaceBillingAccountActorSpec
         ArgumentMatchers.eq(v1GoogleProjectId), ArgumentMatchers.eq(newBillingAccount),
         any[OpenCensusSpan]
       )
-    }
-
-  it should "mark a billing project's billing account as invalid if Google returns a 403" in
-    withEmptyTestDatabase { dataSource: SlickDataSource =>
-      val originalBillingAccount = Option(defaultBillingAccountName)
-      val billingProject = RawlsBillingProject(defaultBillingProjectName, CreationStatuses.Ready, originalBillingAccount, None, googleProjectNumber = Option(defaultGoogleProjectNumber))
-      val v1Workspace = Workspace(billingProject.projectName.value, "v1", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V1, GoogleProjectId(billingProject.projectName.value), billingProject.googleProjectNumber, originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
-      val v2Workspace = Workspace(billingProject.projectName.value, "v2", UUID.randomUUID().toString, "bucketName", None, DateTime.now, DateTime.now, "creator@example.com", Map.empty, false, WorkspaceVersions.V2, GoogleProjectId("differentId"), Option(GoogleProjectNumber("43")), originalBillingAccount, None, Option(DateTime.now), WorkspaceType.RawlsWorkspace)
-      val newBillingAccount = RawlsBillingAccountName("new-ba")
-
-      runAndWait {
-        for {
-          _ <- rawlsBillingProjectQuery.create(billingProject)
-          project <- rawlsBillingProjectQuery.load(billingProject.projectName)
-          _ <- workspaceQuery.createOrUpdate(v1Workspace)
-          _ <- workspaceQuery.createOrUpdate(v2Workspace)
-          _ <- rawlsBillingProjectQuery.updateBillingAccount(billingProject.projectName, Option(newBillingAccount), testData.userOwner.userSubjectId)
-        } yield project.value.invalidBillingAccount shouldBe false
-      }
-
-      val exceptionMessage = "Naughty naughty!  You ain't got no permissions!"
-      val failingGcsDao = new MockGoogleServicesDAO("") {
-        override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan = null): Future[ProjectBillingInfo] = {
-          Future.failed(new RawlsExceptionWithErrorReport(ErrorReport(StatusCodes.Forbidden, exceptionMessage)))
-        }
-      }
-
-      WorkspaceBillingAccountActor(dataSource, gcsDAO = failingGcsDao)
-        .updateBillingAccounts
-        .unsafeRunSync
-
-      runAndWait {
-        for {
-          project <- rawlsBillingProjectQuery.load(billingProject.projectName)
-          workspaces <- workspaceQuery.listWithBillingProject(billingProject.projectName)
-        } yield {
-          project.value.invalidBillingAccount shouldBe true
-          every(workspaces.map(_.billingAccountErrorMessage.value)) should include(exceptionMessage)
-        }
-      }
     }
 
   it should "sync only the latest billing account changes" in
@@ -414,7 +376,7 @@ class WorkspaceBillingAccountActorSpec
       }
     }
 
-  it should "mark the billing account as invalid if it fails to sync a v1 billing project" in
+  it should "mark the billing account as invalid in the billing project if terra does not have access" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       runAndWait {
         for {
@@ -429,6 +391,10 @@ class WorkspaceBillingAccountActorSpec
       }
 
       val gcsDao = new MockGoogleServicesDAO("test") {
+
+        override def testDMBillingAccountAccess(billingAccountName: RawlsBillingAccountName): Future[Boolean] =
+          Future.successful(false)
+
         override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan): Future[ProjectBillingInfo] =
           Future.failed(new RawlsException("You do not have access to this billing account or it does not exist."))
       }
@@ -455,7 +421,7 @@ class WorkspaceBillingAccountActorSpec
       }
     }
 
-  it should "not update v2 billing project validity when updating v2 workspaces" in
+  it should "not update billing project validity when updating workspaces fails" in
     withEmptyTestDatabase { dataSource: SlickDataSource =>
       runAndWait {
         for {
@@ -474,7 +440,7 @@ class WorkspaceBillingAccountActorSpec
           Future.successful(false)
 
         override def setBillingAccountName(googleProjectId: GoogleProjectId, billingAccountName: RawlsBillingAccountName, span: OpenCensusSpan): Future[ProjectBillingInfo] =
-          Future.failed(new RawlsException("You do not have access to this billing account or it does not exist."))
+          Future.failed(new RawlsException("he's dead jim."))
       }
 
       WorkspaceBillingAccountActor(dataSource, gcsDAO = gcsDao)

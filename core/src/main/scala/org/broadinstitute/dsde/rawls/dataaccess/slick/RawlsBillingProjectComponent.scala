@@ -325,15 +325,15 @@ trait RawlsBillingProjectComponent {
     def setBillingAccount(billingAccount: Option[RawlsBillingAccountName],
                           userSubjectId: RawlsUserSubjectId): ReadWriteAction[Int] =
       for {
-        billingProjects <- query.result
+        billingProjects <- query.read
         count <- query.map(_.billingAccount).update(billingAccount.map(_.value))
         // Record each billing account change
         // - so the `WorkspaceBillingAccountActor` can synchronise the changes with google
         // - to keep an audit log of billing account changes
         _ <- DBIO.sequence(billingProjects.map { project =>
           BillingAccountChanges.create(
-            RawlsBillingProjectName(project.projectName),
-            project.billingAccount.map(RawlsBillingAccountName),
+            project.projectName,
+            project.billingAccount,
             billingAccount,
             userSubjectId
           )
@@ -422,7 +422,6 @@ trait RawlsBillingProjectComponent {
      *    GROUP BY BILLING_PROJECT_NAME
      * ) AS SUBTABLE
      * WHERE SUBTABLE.MAXID = BAC.ID
-     * AND BAC.SYNC IS NULL;
      */
     /**
       * Selects the latest changes for all billing projects in query.
@@ -436,6 +435,9 @@ trait RawlsBillingProjectComponent {
         .filter(_.id.in(latestChangeIds))
         .sortBy(_.id.asc)
     }
+
+    def unsynced: BillingAccountChangeQuery =
+      query.filter(_.googleSyncTime.isEmpty)
 
     // setters
     def setOutcome(outcome: Option[Outcome]): WriteAction[Int] =

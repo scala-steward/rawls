@@ -66,35 +66,37 @@ class RawlsBillingProjectComponentSpec extends TestDriverComponentWithFlatSpecAn
     billingAccountChange.value.userId shouldBe userId
   }
 
-  it should "not create a BillingAccountChange record if the Billing Account is updated with the same value" in withDefaultTestDatabase {
-    runAndWait {
-      for {
-        changeRecordBefore <- BillingAccountChanges.getLastChange(testData.testProject1Name)
-        _ <- rawlsBillingProjectQuery.updateBillingAccount(
-          testData.testProject1Name,
-          testData.billingProject.billingAccount,
-          testData.userOwner.userSubjectId)
-        changeRecordAfter <- BillingAccountChanges.getLastChange(testData.testProject1Name)
-      } yield {
-        changeRecordBefore shouldBe empty
-        changeRecordAfter shouldBe empty
+  it should "fail when the Billing Account is updated with the same value" in
+    withDefaultTestDatabase {
+      intercept[SQLException] {
+        runAndWait {
+          for {
+            _ <- rawlsBillingProjectQuery.updateBillingAccount(
+              testData.testProject1Name,
+              testData.billingProject.billingAccount,
+              testData.userOwner.userSubjectId
+            )
+          } yield fail("Should not allow billing accounts to be set to the same value.")
+        }
       }
     }
-  }
 
-  it should "not throw an exception if changing Billing Account from None to None" in withEmptyTestDatabase {
-    runAndWait {
-      for {
-        _ <- rawlsBillingProjectQuery.create(testData.testProject1.copy(billingAccount = None))
-        _ <- rawlsBillingProjectQuery.updateBillingAccount(
-          testData.testProject1Name,
-          billingAccount = None,
-          testData.userOwner.userSubjectId
-        )
-        _ <- BillingAccountChanges.getLastChange(testData.testProject1Name)
-      } yield ()
+  it should "fail when changing Billing Account from None to None" in
+    withEmptyTestDatabase {
+      val billingProject = testData.testProject1.copy(billingAccount = None)
+      runAndWait(rawlsBillingProjectQuery.create(billingProject))
+      intercept[SQLException] {
+        runAndWait {
+          for {
+            _ <- rawlsBillingProjectQuery.updateBillingAccount(
+              billingProject.projectName,
+              billingAccount = None,
+              testData.userOwner.userSubjectId
+            )
+          } yield fail("Should not allow billing accounts to be set to the same value.")
+        }
+      }
     }
-  }
 
   // V2 Billing Projects do not actually need to sync to Google.  We only set Billing Accounts on Google Projects when
   // we create Workspaces, so do not need to audit the Billing Account during Billing Project creation.
