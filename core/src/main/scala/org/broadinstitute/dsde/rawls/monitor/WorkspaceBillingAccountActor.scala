@@ -131,31 +131,54 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
 
   def updateWorkspacesInProject(billingAccountChange: BillingAccountChange,
                                 billingProject: RawlsBillingProject,
-                                billProjectSyncOutcome: Outcome): IO[Unit] =
-    listWorkspacesInProject(billingProject.projectName).flatMap(_.traverse_ { workspace =>
-      for {
-        _ <- info("Updating Billing Account on Workspace Google Project",
-          "changeId" -> billingAccountChange.id,
-          "workspace" -> workspace.toWorkspaceName,
-          "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
-        )
+                                billingProjectSyncOutcome: Outcome): IO[Unit] =
+    for {
+      // v1 workspaces use the v1 billing project's google project and we've already attempted
+      // to update which billing account it uses. We can update, therefore, all workspaces that
+      // use that google project with the outcome of setting the billing account on the v1
+      // billing project.
+      _ <- setWorkspaceBillingAccountAndErrorMessage(
+        workspaceQuery
+          .withBillingProject(billingProject.projectName)
+          .withGoogleProjectId(billingProject.googleProjectId),
+        billingProject.billingAccount,
+        Outcome.toTuple(billingProjectSyncOutcome)._2
+      )
 
-        // error messages from syncing v1 billing projects are also written to the v1 workspace
-        // record. We'll try to sync each v2 workspace regardless our of sheer bloody-mindedness.
-        workspaceSyncOutcome <- if (workspace.googleProjectId != billingProject.googleProjectId)
-          updateBillingAccountOnGoogle(workspace.googleProjectId, billingProject.billingAccount).attempt.map(Outcome.fromEither) else
-          IO.pure(billProjectSyncOutcome)
+      // v2 workspaces have their own google project so we'll need to attempt to set the
+      // billing account on each.
+      v2Workspaces <- listV2WorkspacesInProject(billingProject)
+      _ <- v2Workspaces.traverse_ { workspace =>
+        for {
+          _ <- info("Updating Billing Account on Workspace Google Project",
+            "changeId" -> billingAccountChange.id,
+            "workspace" -> workspace.toWorkspaceName,
+            "newBillingAccount" -> billingAccountChange.newBillingAccount.map(_.value)
+          )
 
-        _ <- recordWorkspaceSyncOutcome(billingAccountChange, workspace,
-          billingProject.billingAccount, workspaceSyncOutcome
-        )
-      } yield ()
-    })
+          workspaceSyncAttempt <- updateBillingAccountOnGoogle(
+            workspace.googleProjectId,
+            billingProject.billingAccount
+          ).attempt
+
+          _ <- recordV2WorkspaceSyncOutcome(
+            billingAccountChange,
+            workspace,
+            billingProject.billingAccount,
+            Outcome.fromEither(workspaceSyncAttempt)
+          )
+        } yield ()
+      }
+    } yield ()
 
 
-  private def listWorkspacesInProject(billingProjectName: RawlsBillingProjectName): IO[List[Workspace]] =
-    dataSource
-      .inTransaction(_.workspaceQuery.listWithBillingProject(billingProjectName))
+  private def listV2WorkspacesInProject(billingProject: RawlsBillingProject): IO[List[Workspace]] =
+    dataSource.inTransaction { _ =>
+      workspaceQuery
+        .withBillingProject(billingProject.projectName)
+        .withoutGoogleProjectId(billingProject.googleProjectId)
+        .read
+    }
       .io
       .map(_.toList)
 
@@ -170,10 +193,10 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
     } yield ()
 
 
-  private def recordWorkspaceSyncOutcome(change: BillingAccountChange,
-                                         workspace: Workspace,
-                                         billingAccount: Option[RawlsBillingAccountName],
-                                         outcome: Outcome): IO[Unit] =
+  private def recordV2WorkspaceSyncOutcome(change: BillingAccountChange,
+                                           workspace: Workspace,
+                                           billingAccount: Option[RawlsBillingAccountName],
+                                           outcome: Outcome): IO[Unit] =
     for {
       failureMessage <- outcome match {
         case Success =>
@@ -191,17 +214,26 @@ final case class WorkspaceBillingAccountActor(dataSource: SlickDataSource, gcsDA
           )
       }
 
-      _ <- dataSource.inTransaction { _ =>
-        val wsQuery = workspaceQuery.withWorkspaceId(workspace.workspaceIdAsUUID)
+      _ <- setWorkspaceBillingAccountAndErrorMessage(
+        workspaceQuery.withWorkspaceId(workspace.workspaceIdAsUUID),
+        billingAccount,
+        failureMessage
+      )
 
-        DBIO.seq(
-          if (outcome.isSuccess)
-            wsQuery.setCurrentBillingAccountOnGoogleProject(billingAccount) else
-            DBIO.successful(),
-          wsQuery.setBillingAccountErrorMessage(failureMessage)
-        )
-      }.io
     } yield ()
+
+
+  private def setWorkspaceBillingAccountAndErrorMessage(workspacesToUpdate: WorkspaceQueryType,
+                                                        billingAccount: Option[RawlsBillingAccountName],
+                                                        errorMessage: Option[String]): IO[Unit] =
+    dataSource.inTransaction { _ =>
+      DBIO.seq(
+        if (errorMessage.isDefined)
+          DBIO.successful() else
+          workspacesToUpdate.setCurrentBillingAccountOnGoogleProject(billingAccount),
+        workspacesToUpdate.setBillingAccountErrorMessage(errorMessage)
+      )
+    }.io
 
 
   /**

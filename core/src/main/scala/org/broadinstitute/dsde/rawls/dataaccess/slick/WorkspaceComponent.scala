@@ -39,6 +39,17 @@ case class WorkspaceRecord(
   def toWorkspaceName: WorkspaceName = WorkspaceName(namespace, name)
 }
 
+object WorkspaceRecord {
+  def fromWorkspace(workspace: Workspace): WorkspaceRecord =
+    WorkspaceRecord(workspace.namespace, workspace.name, UUID.fromString(workspace.workspaceId), workspace.bucketName, workspace.workflowCollectionName, new Timestamp(workspace.createdDate.getMillis), new Timestamp(workspace.lastModified.getMillis), workspace.createdBy, workspace.isLocked, 0, workspace.workspaceVersion.value, workspace.googleProjectId.value, workspace.googleProjectNumber.map(_.value), workspace.currentBillingAccountOnGoogleProject.map(_.value), workspace.billingAccountErrorMessage, workspace.completedCloneWorkspaceFileTransfer.map(dateTime => new Timestamp(dateTime.getMillis)), workspaceType = workspace.workspaceType.toString)
+
+  def toWorkspace(workspaceRec: WorkspaceRecord): Workspace =
+    Workspace(workspaceRec.namespace, workspaceRec.name, workspaceRec.id.toString, workspaceRec.bucketName, workspaceRec.workflowCollection, new DateTime(workspaceRec.createdDate), new DateTime(workspaceRec.lastModified), workspaceRec.createdBy, Map.empty, workspaceRec.isLocked, WorkspaceVersions.fromStringThrows(workspaceRec.workspaceVersion), GoogleProjectId(workspaceRec.googleProjectId), workspaceRec.googleProjectNumber.map(GoogleProjectNumber), workspaceRec.currentBillingAccountOnGoogleProject.map(RawlsBillingAccountName), workspaceRec.billingAccountErrorMessage, workspaceRec.completedCloneWorkspaceFileTransfer.map(timestamp => new DateTime(timestamp)), WorkspaceType.withName(workspaceRec.workspaceType))
+
+  def toWorkspace(workspaceRec: WorkspaceRecord, attributes: AttributeMap): Workspace =
+    Workspace(workspaceRec.namespace, workspaceRec.name, workspaceRec.id.toString, workspaceRec.bucketName, workspaceRec.workflowCollection, new DateTime(workspaceRec.createdDate), new DateTime(workspaceRec.lastModified), workspaceRec.createdBy, attributes, workspaceRec.isLocked, WorkspaceVersions.fromStringThrows(workspaceRec.workspaceVersion), GoogleProjectId(workspaceRec.googleProjectId), workspaceRec.googleProjectNumber.map(GoogleProjectNumber), workspaceRec.currentBillingAccountOnGoogleProject.map(RawlsBillingAccountName), workspaceRec.billingAccountErrorMessage, workspaceRec.completedCloneWorkspaceFileTransfer.map(timestamp => new DateTime(timestamp)), WorkspaceType.withName(workspaceRec.workspaceType))
+}
+
 trait WorkspaceComponent {
   this: DriverComponent
     with AttributeComponent
@@ -72,7 +83,7 @@ trait WorkspaceComponent {
 
     def uniqueNamespaceName = index("IDX_WS_UNIQUE_NAMESPACE_NAME", (namespace, name), unique = true)
 
-    def * = (namespace, name, id, bucketName, workflowCollection, createdDate, lastModified, createdBy, isLocked, recordVersion, workspaceVersion, googleProjectId, googleProjectNumber, currentBillingAccountOnGoogleProject, billingAccountErrorMessage, completedCloneWorkspaceFileTransfer, workspaceType) <> (WorkspaceRecord.tupled, WorkspaceRecord.unapply)
+    def * = (namespace, name, id, bucketName, workflowCollection, createdDate, lastModified, createdBy, isLocked, recordVersion, workspaceVersion, googleProjectId, googleProjectNumber, currentBillingAccountOnGoogleProject, billingAccountErrorMessage, completedCloneWorkspaceFileTransfer, workspaceType) <> ((WorkspaceRecord.apply _).tupled, WorkspaceRecord.unapply)
   }
 
   /** raw/optimized SQL queries for working with workspace attributes
@@ -154,13 +165,8 @@ trait WorkspaceComponent {
       loadWorkspaces(workspaceQuery)
     }
 
-    def listWithBillingProject(billingProject: RawlsBillingProjectName): ReadAction[Seq[Workspace]] = {
-      for {
-        workspaceRecords <- filter(rec => rec.namespace === billingProject.value).result
-      } yield {
-        workspaceRecords.map(unmarshalWorkspace)
-      }
-    }
+    def listWithBillingProject(billingProject: RawlsBillingProjectName): ReadAction[Seq[Workspace]] =
+      workspaceQuery.withBillingProject(billingProject).read
 
     def getTags(queryString: Option[String], limit: Option[Int] = None, ownerIds: Option[Seq[UUID]] = None): ReadAction[Seq[WorkspaceTag]] = {
       val tags = workspaceAttributeQuery.findUniqueStringsByNameQuery(AttributeName.withTagsNS, queryString, limit, ownerIds).result
@@ -190,7 +196,7 @@ trait WorkspaceComponent {
 
       uniqueResult[WorkspaceRecord](findByIdQuery(UUID.fromString(workspace.workspaceId))) flatMap {
         case None =>
-          (workspaceQuery += marshalNewWorkspace(workspace)) andThen
+          (workspaceQuery += WorkspaceRecord.fromWorkspace(workspace)) andThen
             rewriteAttributes(workspace) andThen
             updateLastModified(UUID.fromString(workspace.workspaceId))
         case Some(workspaceRecord) =>
@@ -424,9 +430,8 @@ trait WorkspaceComponent {
       filter(rec => rec.googleProjectId === googleProjectId.value)
     }
 
-    def findByIdQuery(workspaceId: UUID): WorkspaceQueryType = {
-      filter(_.id === workspaceId)
-    }
+    def findByIdQuery(workspaceId: UUID): WorkspaceQueryType =
+      workspaceQuery.withWorkspaceId(workspaceId)
 
     def findByIdAndRecordVersionQuery(workspaceId: UUID, recordVersion: Long): WorkspaceQueryType = {
       filter(w => w.id === workspaceId && w.recordVersion === recordVersion)
@@ -436,9 +441,8 @@ trait WorkspaceComponent {
       filter(_.id.inSetBind(workspaceIds))
     }
 
-    private def findByNamespaceQuery(namespaceName: RawlsBillingProjectName): WorkspaceQueryType = {
-      filter(rec => (rec.namespace === namespaceName.value))
-    }
+    private def findByNamespaceQuery(namespaceName: RawlsBillingProjectName): WorkspaceQueryType =
+      workspaceQuery.withBillingProject(namespaceName)
 
     private def findByNamespacesQuery(namespaceNames: Seq[RawlsBillingProjectName]): WorkspaceQueryType = {
       filter(_.namespace.inSetBind(namespaceNames.map(_.value)))
@@ -458,28 +462,31 @@ trait WorkspaceComponent {
       } yield {
         val attributesByWsId = workspaceAttributeQuery.unmarshalAttributes(workspaceAttributeRecs)
         workspaceRecs.map { workspaceRec =>
-          unmarshalWorkspace(workspaceRec, attributesByWsId.getOrElse(workspaceRec.id, Map.empty))
+          WorkspaceRecord.toWorkspace(workspaceRec, attributesByWsId.getOrElse(workspaceRec.id, Map.empty))
         }
       }
-    }
-
-    private def marshalNewWorkspace(workspace: Workspace) = {
-      WorkspaceRecord(workspace.namespace, workspace.name, UUID.fromString(workspace.workspaceId), workspace.bucketName, workspace.workflowCollectionName, new Timestamp(workspace.createdDate.getMillis), new Timestamp(workspace.lastModified.getMillis), workspace.createdBy, workspace.isLocked, 0, workspace.workspaceVersion.value, workspace.googleProjectId.value, workspace.googleProjectNumber.map(_.value), workspace.currentBillingAccountOnGoogleProject.map(_.value), workspace.billingAccountErrorMessage, workspace.completedCloneWorkspaceFileTransfer.map(dateTime => new Timestamp(dateTime.getMillis)), workspaceType = workspace.workspaceType.toString)
-    }
-
-    private def unmarshalWorkspace(workspaceRec: WorkspaceRecord): Workspace = {
-      Workspace(workspaceRec.namespace, workspaceRec.name, workspaceRec.id.toString, workspaceRec.bucketName, workspaceRec.workflowCollection, new DateTime(workspaceRec.createdDate), new DateTime(workspaceRec.lastModified), workspaceRec.createdBy, Map.empty, workspaceRec.isLocked, WorkspaceVersions.fromStringThrows(workspaceRec.workspaceVersion), GoogleProjectId(workspaceRec.googleProjectId), workspaceRec.googleProjectNumber.map(GoogleProjectNumber), workspaceRec.currentBillingAccountOnGoogleProject.map(RawlsBillingAccountName), workspaceRec.billingAccountErrorMessage, workspaceRec.completedCloneWorkspaceFileTransfer.map(timestamp => new DateTime(timestamp)), WorkspaceType.withName(workspaceRec.workspaceType))
-    }
-
-    private def unmarshalWorkspace(workspaceRec: WorkspaceRecord, attributes: AttributeMap): Workspace = {
-      Workspace(workspaceRec.namespace, workspaceRec.name, workspaceRec.id.toString, workspaceRec.bucketName, workspaceRec.workflowCollection, new DateTime(workspaceRec.createdDate), new DateTime(workspaceRec.lastModified), workspaceRec.createdBy, attributes, workspaceRec.isLocked, WorkspaceVersions.fromStringThrows(workspaceRec.workspaceVersion), GoogleProjectId(workspaceRec.googleProjectId), workspaceRec.googleProjectNumber.map(GoogleProjectNumber), workspaceRec.currentBillingAccountOnGoogleProject.map(RawlsBillingAccountName), workspaceRec.billingAccountErrorMessage, workspaceRec.completedCloneWorkspaceFileTransfer.map(timestamp => new DateTime(timestamp)), WorkspaceType.withName(workspaceRec.workspaceType))
     }
   }
 
   implicit class WorkspaceExtensions(query: WorkspaceQueryType) {
+
+    def read: ReadAction[Seq[Workspace]] =
+      for {
+        records <- query.result
+      } yield records.map(WorkspaceRecord.toWorkspace)
+
     // filters
     def withWorkspaceId(workspaceId: UUID): WorkspaceQueryType =
       query.filter(_.id === workspaceId)
+
+    def withBillingProject(projectName: RawlsBillingProjectName): WorkspaceQueryType =
+      query.filter(_.namespace === projectName.value)
+
+    def withGoogleProjectId(googleProjectId: GoogleProjectId): WorkspaceQueryType =
+      query.filter(_.googleProjectId === googleProjectId.value)
+
+    def withoutGoogleProjectId(googleProjectId: GoogleProjectId): WorkspaceQueryType =
+      query.filter(_.googleProjectId =!= googleProjectId.value)
 
     // setters
     def setCurrentBillingAccountOnGoogleProject(billingAccount: Option[RawlsBillingAccountName]): WriteAction[Int] =
